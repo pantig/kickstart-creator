@@ -76,6 +76,13 @@ public class ScribanKickstartTemplateRendererTests
         // disks on some controllers, and is used only as a display alias here.
         Assert.Contains("for sysblock in /sys/block/*", rendered);
         Assert.DoesNotContain("head -", rendered);
+        // Slower-initializing SCSI/SAS/RAID controllers can still lag behind
+        // NVMe/SATA at the moment %pre first runs - rescan_disks() forces a
+        // fresh SCSI bus scan + udevadm settle, and the operator can also
+        // manually retry with 'r' without restarting the whole script.
+        Assert.Contains("rescan_disks", rendered);
+        Assert.Contains("scsi_host", rendered);
+        Assert.Contains("zeby odswiezyc", rendered);
     }
 
     [Fact]

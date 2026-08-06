@@ -24,8 +24,14 @@ referencyjny - nie jest uzywany w runtime; wersja uzywana przez aplikacje to
      `%pre` liste dostepnych dyskow na konsoli (z ostrzezeniem przy dyskach,
      ktore juz maja partycje) i czeka, az operator wpisze numer. Partycjonowanie
      (ten sam schemat CIS co w trybie recznym) generuje sie dynamicznie przez
-     `%include`. **Wymaga kogos przy konsoli/wirtualnym KVM w momencie
-     instalacji - nie nadaje sie do w pelni bezobslugowego PXE.**
+     `%include`. Lista dyskow czytana jest z `/sys/block` (kernel), nie z
+     `/dev/disk/by-id` (wypelnianego asynchronicznie przez `udev`) - dodatkowo
+     wymuszane jest przeskanowanie magistrali SCSI (`rescan_disks`), bo
+     kontrolery HBA/RAID SCSI/SAS potrafia konczyc wykrywanie dyskow
+     zauwazalnie pozniej niz NVMe/SATA; operator moze tez recznie wpisac `r`
+     zeby odswiezyc liste bez restartu skryptu. **Wymaga kogos przy
+     konsoli/wirtualnym KVM w momencie instalacji - nie nadaje sie do w pelni
+     bezobslugowego PXE.**
    - **Podaj z gory (`by-id`)** - dysk wpisany w formularzu trafia od razu do
      `ignoredisk`/`part`/`part pv.01` (4 miejsca, podstawiane automatycznie z
      jednego pola). Instalacja w pelni automatyczna/bezobslugowa, ale wymaga,

@@ -90,57 +90,75 @@ echo ""
 echo "UWAGA: wybrany dysk zostanie CALKOWICIE WYCZYSZCZONY (clearpart --all)."
 echo ""
 
-declare -a DISK_LIST=()
-INDEX=0
-
-echo "Dostepne dyski:"
-echo ""
+# Niektore kontrolery (zwlaszcza HBA/RAID SCSI/SAS) koncza wykrywanie swoich
+# dyskow zauwazalnie pozniej niz NVMe/SATA - bez tego dyski za takim
+# kontrolerem moga byc jeszcze niewidoczne w /sys/block w momencie startu
+# %pre, mimo ze jadro finalnie je znajdzie kilka sekund pozniej.
+rescan_disks() {
+  for host in /sys/class/scsi_host/*; do
+    [ -w "$host/scan" ] && echo "- - -" > "$host/scan" 2>/dev/null
+  done
+  udevadm settle --timeout=15 2>/dev/null || true
+  sleep 2
+}
 
 # Zrodlem prawdy jest /sys/block (kompletna lista wszystkich dyskow, ktore
 # jadro juz wykrylo) - NIE /dev/disk/by-id, ktory wypelnia sie asynchronicznie
-# przez udev i przy wolniejszych/bardziej zlozonych kontrolerach (np. wiele
-# dyskow za jednym HBA) moze byc jeszcze niepelny w momencie startu %pre. Dla
-# kazdego dysku probujemy znalezc czytelny alias w /dev/disk/by-id wylacznie
-# do WYSWIETLENIA - jesli go nie ma, pokazujemy surowa nazwe /dev/sdX (i tak
-# dziala poprawnie jako --ondisk=/--only-use=, bo caly ten blok generuje sie
-# od nowa w tym samym rozruchu).
-for sysblock in /sys/block/*; do
-  NAME=$(basename "$sysblock")
+# przez udev i moze byc jeszcze niepelny. Dla kazdego dysku probujemy znalezc
+# czytelny alias w /dev/disk/by-id wylacznie do WYSWIETLENIA - jesli go nie
+# ma, pokazujemy surowa nazwe /dev/sdX (i tak dziala poprawnie jako
+# --ondisk=/--only-use=, bo caly ten blok generuje sie od nowa w tym samym
+# rozruchu).
+list_disks() {
+  DISK_LIST=()
+  INDEX=0
+  echo "Dostepne dyski:"
+  echo ""
+  for sysblock in /sys/block/*; do
+    NAME=$(basename "$sysblock")
 
-  # Pomijaj urzadzenia, ktore nie sa realnymi dyskami instalacyjnymi.
-  case "$NAME" in
-    loop*|ram*|zram*|sr*|fd*) continue ;;
-  esac
+    # Pomijaj urzadzenia, ktore nie sa realnymi dyskami instalacyjnymi.
+    case "$NAME" in
+      loop*|ram*|zram*|sr*|fd*) continue ;;
+    esac
 
-  DEV="/dev/$NAME"
-  [ -b "$DEV" ] || continue
+    DEV="/dev/$NAME"
+    [ -b "$DEV" ] || continue
 
-  SIZE_SECTORS=$(cat "$sysblock/size" 2>/dev/null || echo 0)
-  [ "$SIZE_SECTORS" -gt 0 ] || continue
+    SIZE_SECTORS=$(cat "$sysblock/size" 2>/dev/null || echo 0)
+    [ "$SIZE_SECTORS" -gt 0 ] || continue
 
-  DISPLAY_NAME="$DEV"
-  for alias in /dev/disk/by-id/*; do
-    [ -e "$alias" ] || continue
-    case "$alias" in *-part*) continue ;; esac
-    if [ "$(readlink -f "$alias" 2>/dev/null)" = "$DEV" ]; then
-      DISPLAY_NAME="$alias"
-      break
+    DISPLAY_NAME="$DEV"
+    for alias in /dev/disk/by-id/*; do
+      [ -e "$alias" ] || continue
+      case "$alias" in *-part*) continue ;; esac
+      if [ "$(readlink -f "$alias" 2>/dev/null)" = "$DEV" ]; then
+        DISPLAY_NAME="$alias"
+        break
+      fi
+    done
+
+    INDEX=$((INDEX + 1))
+    DISK_LIST+=("$DISPLAY_NAME")
+
+    SIZE_GB=$((SIZE_SECTORS * 512 / 1024 / 1024 / 1024))
+    PART_COUNT=$(lsblk -n -o NAME "$DEV" 2>/dev/null | tail -n +2 | wc -l)
+    if [ "$PART_COUNT" -gt 0 ]; then
+      printf "  %2d) %-55s (~%4sGB)  UWAGA: %s partycji juz istnieje\n" "$INDEX" "$DISPLAY_NAME" "$SIZE_GB" "$PART_COUNT"
+    else
+      printf "  %2d) %-55s (~%4sGB)  pusty\n" "$INDEX" "$DISPLAY_NAME" "$SIZE_GB"
     fi
   done
+  echo ""
+}
 
-  INDEX=$((INDEX + 1))
-  DISK_LIST+=("$DISPLAY_NAME")
+declare -a DISK_LIST=()
+INDEX=0
 
-  SIZE_GB=$((SIZE_SECTORS * 512 / 1024 / 1024 / 1024))
-  PART_COUNT=$(lsblk -n -o NAME "$DEV" 2>/dev/null | tail -n +2 | wc -l)
-  if [ "$PART_COUNT" -gt 0 ]; then
-    printf "  %2d) %-55s (~%4sGB)  UWAGA: %s partycji juz istnieje\n" "$INDEX" "$DISPLAY_NAME" "$SIZE_GB" "$PART_COUNT"
-  else
-    printf "  %2d) %-55s (~%4sGB)  pusty\n" "$INDEX" "$DISPLAY_NAME" "$SIZE_GB"
-  fi
-done
-
+echo "Wykrywanie dyskow (kilka sekund - niektore kontrolery inicjalizuja sie wolniej niz NVMe/SATA)..."
 echo ""
+rescan_disks
+list_disks
 
 if [ "$INDEX" -eq 0 ]; then
   echo "BLAD: nie znaleziono zadnego dysku blokowego przez /sys/block."
@@ -151,11 +169,25 @@ if [ "$INDEX" -eq 0 ]; then
 fi
 
 while true; do
-  read -r -p "Wpisz numer dysku do instalacji (1-$INDEX): " CHOICE
+  read -r -p "Wpisz numer dysku (1-$INDEX), albo 'r' zeby odswiezyc liste: " CHOICE
+
+  if [ "$CHOICE" = "r" ] || [ "$CHOICE" = "R" ]; then
+    echo ""
+    echo "Odswiezanie listy dyskow..."
+    echo ""
+    rescan_disks
+    list_disks
+    if [ "$INDEX" -eq 0 ]; then
+      echo "Nadal brak dyskow - sprawdz sterowniki/konfiguracje kontrolera."
+    fi
+    continue
+  fi
+
   if [[ "$CHOICE" =~ ^[0-9]+$ ]] && [ "$CHOICE" -ge 1 ] && [ "$CHOICE" -le "$INDEX" ]; then
     break
   fi
-  echo "Blad: wpisz liczbe od 1 do $INDEX"
+
+  echo "Blad: wpisz liczbe od 1 do $INDEX, albo 'r' zeby odswiezyc"
 done
 
 SELECTED_DISK="${DISK_LIST[$((CHOICE - 1))]}"
