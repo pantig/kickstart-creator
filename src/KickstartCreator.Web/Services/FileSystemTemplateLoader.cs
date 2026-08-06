@@ -1,3 +1,4 @@
+using Scriban;
 using Scriban.Parsing;
 using Scriban.Runtime;
 
