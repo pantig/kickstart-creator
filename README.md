@@ -139,6 +139,87 @@ wychodzenia z kontenera:
 docker compose exec kickstart-creator ls -la /data/artifacts
 ```
 
+## Jak podpiac wygenerowany kickstart przy instalacji RHEL
+
+Wygenerowane `OEMDRV.iso`/`OEMDRV.img` zawieraja **tylko** `ks.cfg` (z etykieta
+wolumenu `OEMDRV`, ktora Anaconda wykrywa automatycznie). Nie modyfikuja i nie
+zastepuja oficjalnego ISO RHEL - podlaczasz je jako **DRUGI, dodatkowy nosnik**
+obok niezmienionego ISO/DVD RHEL. Ktorego pliku uzyc zalezy od tego, jaki typ
+nosnika obsluguje Twoje srodowisko:
+- **`OEMDRV.iso`** - gdy masz do dyspozycji drugi slot na CD/DVD (wirtualny
+  naped w hipernadzorcy, druga wirtualna konsola w BMC).
+- **`OEMDRV.img`** - gdy masz do dyspozycji tylko USB/floppy (fizyczny pendrive,
+  albo BMC ktory pozwala zamontowac tylko jeden wirtualny CD naraz, a drugi
+  slot to USB).
+
+### Maszyna wirtualna (KVM/libvirt, Proxmox, VMware, Hyper-V, VirtualBox)
+
+1. Utworz VM wskazujac oficjalne ISO RHEL jako **glowny/bootowalny** naped
+   optyczny (tak jak zawsze).
+2. Dodaj **drugi** wirtualny naped CD/DVD i zamontuj w nim `OEMDRV.iso`.
+3. Uruchom VM z pierwszego napedu (RHEL ISO) - Anaconda przy starcie sama
+   wykryje wolumen `OEMDRV` na drugim napedzie i zaladuje z niego `ks.cfg`.
+
+Przyklad `virt-install` (libvirt/KVM):
+
+```bash
+virt-install \
+  --name rhel9-host \
+  --memory 4096 --vcpus 2 \
+  --disk size=160 \
+  --cdrom /sciezka/do/rhel-9.8-x86_64-dvd.iso \
+  --disk /sciezka/do/OEMDRV.iso,device=cdrom \
+  --os-variant rhel9.0 \
+  --network network=default
+```
+
+W Proxmox/VMware/Hyper-V: dodaj drugi napęd CD/DVD do VM w ustawieniach
+sprzętu i zamontuj w nim `OEMDRV.iso`, analogicznie do pierwszego.
+
+### Serwer fizyczny przez BMC (iDRAC, iLO, IPMI/Supermicro, Cisco CIMC)
+
+1. Zaloguj się do konsoli zarządzającej (Virtual Console / Remote Console).
+2. **Virtual Media** → zamontuj oficjalne ISO RHEL jako pierwszy wirtualny
+   CD/DVD.
+3. Jeśli BMC pozwala zamontować drugi nośnik jednocześnie (większość
+   nowszych iDRAC/iLO to potrafi) → zamontuj `OEMDRV.iso` jako drugi wirtualny
+   CD/DVD. Jeśli BMC obsługuje tylko jeden wirtualny CD naraz, ale ma osobny
+   slot na wirtualne USB → zamontuj tam `OEMDRV.img`.
+4. Ustaw boot z wirtualnego CD (RHEL ISO) i uruchom serwer.
+
+### Nośniki fizyczne (bez wirtualizacji/BMC)
+
+1. Nagraj/zapisz oficjalne ISO RHEL na DVD (lub `dd` na USB, standardowo).
+2. `OEMDRV.img` zapisz na **osobnym**, małym pendrive:
+   ```bash
+   sudo dd if=OEMDRV.img of=/dev/sdX bs=4M status=progress conv=fsync
+   ```
+   (`/dev/sdX` = Twój drugi pendrive - **nie** ten z RHEL ISO; sprawdź `lsblk`
+   przed uruchomieniem, `dd` nadpisuje cel bezpowrotnie).
+3. Podłącz oba nośniki do serwera, wybierz w BIOS/UEFI boot z nośnika RHEL.
+
+### Jeśli Anaconda nie wykryje OEMDRV automatycznie (fallback)
+
+Zdarza się to rzadko (np. nietypowy kontroler USB), ale da się to wymusić
+ręcznie: na ekranie startowym instalatora RHEL zaznacz opcję instalacji,
+wciśnij `Tab` (BIOS) albo `e` (UEFI/GRUB) żeby edytować linię boot, i dopisz
+na końcu:
+
+```
+inst.ks=hd:LABEL=OEMDRV:/ks.cfg
+```
+
+Zatwierdź (`Enter`/`Ctrl+X`) żeby zbootować z tym parametrem.
+
+### Jak zweryfikować, że kickstart się zaaplikował
+
+Podczas instalacji: `Ctrl+Alt+F2` (konsola fizyczna/wirtualna) przełącza na
+tty z logami - `/tmp/pre-ks.log` i `/tmp/anaconda.log` potwierdzają wykrycie
+`OEMDRV` i zastosowanie `ks.cfg`. Po instalacji, przy pierwszym zalogowaniu,
+wyświetli się automatycznie kolorowy raport CIS L2 + nasza checklista
+hardeningu (patrz sekcja "Co generator robi" wyżej) - to najszybsze
+potwierdzenie, że wszystko poszło zgodnie z planem.
+
 ## Rozwoj lokalny (bez Dockera)
 
 Wymaga .NET 10 SDK oraz w PATH: `openssl`, `xorriso`, `mkfs.vfat`
