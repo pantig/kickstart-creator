@@ -71,6 +71,11 @@ public class ScribanKickstartTemplateRendererTests
         Assert.DoesNotContain("ignoredisk --only-use=/dev/disk/by-id/md-uuid-TESTDISK", rendered);
         // No hardcoded disk anywhere - selection happens live via $SELECTED_DISK at install time.
         Assert.DoesNotContain("TESTDISK", rendered);
+        // Enumeration walks /sys/block (kernel ground truth, no fixed count) -
+        // NOT solely /dev/disk/by-id, which is udev-populated and can lag/miss
+        // disks on some controllers, and is used only as a display alias here.
+        Assert.Contains("for sysblock in /sys/block/*", rendered);
+        Assert.DoesNotContain("head -", rendered);
     }
 
     [Fact]

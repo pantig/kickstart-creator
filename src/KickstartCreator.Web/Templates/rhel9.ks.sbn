@@ -90,61 +90,63 @@ echo ""
 echo "UWAGA: wybrany dysk zostanie CALKOWICIE WYCZYSZCZONY (clearpart --all)."
 echo ""
 
-DISK_SOURCE_DIR=/dev/disk/by-id
-if [ ! -d "$DISK_SOURCE_DIR" ] || [ -z "$(ls -A "$DISK_SOURCE_DIR" 2>/dev/null)" ]; then
-  echo "Brak wpisow w /dev/disk/by-id - uzywam /dev/disk/by-path jako fallback."
-  DISK_SOURCE_DIR=/dev/disk/by-path
-fi
-
 declare -a DISK_LIST=()
-declare -a SEEN_TARGETS=()
 INDEX=0
 
 echo "Dostepne dyski:"
 echo ""
 
-for disk in "$DISK_SOURCE_DIR"/*; do
-  [ -e "$disk" ] || continue
+# Zrodlem prawdy jest /sys/block (kompletna lista wszystkich dyskow, ktore
+# jadro juz wykrylo) - NIE /dev/disk/by-id, ktory wypelnia sie asynchronicznie
+# przez udev i przy wolniejszych/bardziej zlozonych kontrolerach (np. wiele
+# dyskow za jednym HBA) moze byc jeszcze niepelny w momencie startu %pre. Dla
+# kazdego dysku probujemy znalezc czytelny alias w /dev/disk/by-id wylacznie
+# do WYSWIETLENIA - jesli go nie ma, pokazujemy surowa nazwe /dev/sdX (i tak
+# dziala poprawnie jako --ondisk=/--only-use=, bo caly ten blok generuje sie
+# od nowa w tym samym rozruchu).
+for sysblock in /sys/block/*; do
+  NAME=$(basename "$sysblock")
 
-  # Pomijaj wpisy partycji - zarowno by-id jak i by-path oznaczaja je
-  # sufiksem "-partN".
-  case "$disk" in
-    *-part*) continue ;;
+  # Pomijaj urzadzenia, ktore nie sa realnymi dyskami instalacyjnymi.
+  case "$NAME" in
+    loop*|ram*|zram*|sr*|fd*) continue ;;
   esac
 
-  [ -b "$disk" ] || continue
+  DEV="/dev/$NAME"
+  [ -b "$DEV" ] || continue
 
-  # Deduplikacja: by-id zwykle wystawia kilka aliasow (ata-..., wwn-...) dla
-  # tego samego fizycznego dysku - pokaz kazde urzadzenie docelowe tylko raz.
-  TARGET=$(readlink -f "$disk")
-  SKIP=0
-  for seen in "${SEEN_TARGETS[@]}"; do
-    if [ "$seen" = "$TARGET" ]; then
-      SKIP=1
+  SIZE_SECTORS=$(cat "$sysblock/size" 2>/dev/null || echo 0)
+  [ "$SIZE_SECTORS" -gt 0 ] || continue
+
+  DISPLAY_NAME="$DEV"
+  for alias in /dev/disk/by-id/*; do
+    [ -e "$alias" ] || continue
+    case "$alias" in *-part*) continue ;; esac
+    if [ "$(readlink -f "$alias" 2>/dev/null)" = "$DEV" ]; then
+      DISPLAY_NAME="$alias"
       break
     fi
   done
-  [ "$SKIP" -eq 1 ] && continue
-  SEEN_TARGETS+=("$TARGET")
 
   INDEX=$((INDEX + 1))
-  DISK_LIST+=("$disk")
+  DISK_LIST+=("$DISPLAY_NAME")
 
-  SIZE_SECTORS=$(cat "/sys/block/$(basename "$TARGET")/size" 2>/dev/null || echo 0)
   SIZE_GB=$((SIZE_SECTORS * 512 / 1024 / 1024 / 1024))
-
-  PART_COUNT=$(lsblk -n -o NAME "$TARGET" 2>/dev/null | tail -n +2 | wc -l)
+  PART_COUNT=$(lsblk -n -o NAME "$DEV" 2>/dev/null | tail -n +2 | wc -l)
   if [ "$PART_COUNT" -gt 0 ]; then
-    printf "  %2d) %-55s (~%4sGB)  UWAGA: %s partycji juz istnieje\n" "$INDEX" "$disk" "$SIZE_GB" "$PART_COUNT"
+    printf "  %2d) %-55s (~%4sGB)  UWAGA: %s partycji juz istnieje\n" "$INDEX" "$DISPLAY_NAME" "$SIZE_GB" "$PART_COUNT"
   else
-    printf "  %2d) %-55s (~%4sGB)  pusty\n" "$INDEX" "$disk" "$SIZE_GB"
+    printf "  %2d) %-55s (~%4sGB)  pusty\n" "$INDEX" "$DISPLAY_NAME" "$SIZE_GB"
   fi
 done
 
 echo ""
 
 if [ "$INDEX" -eq 0 ]; then
-  echo "BLAD: nie znaleziono zadnego dysku blokowego. Instalacja przerwana."
+  echo "BLAD: nie znaleziono zadnego dysku blokowego przez /sys/block."
+  echo "Sterowniki kontrolera mogly jeszcze nie skonczyc inicjalizacji - sprobuj"
+  echo "ponownie za chwile, albo sprawdz konfiguracje kontrolera RAID/HBA."
+  echo "Instalacja przerwana."
   exit 1
 fi
 
