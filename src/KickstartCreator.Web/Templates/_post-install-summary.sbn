@@ -108,6 +108,9 @@ fi
   grep -q "hidepid=2" /etc/fstab
   check "/proc montowany z hidepid=2" $?
 
+  grep -qE '^\s*kernel\.printk\s*=\s*1\s+4\s+1\s+7\s*$' /etc/sysctl.d/99-console-printk.conf
+  check "Komunikaty kernela na konsoli wyciszone (kernel.printk = 1 4 1 7)" $?
+
   [ -f /etc/cron.allow ] && [ -f /etc/at.allow ]
   check "/etc/cron.allow i /etc/at.allow istnieja (CIS 5.1.8)" $?
 

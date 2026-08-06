@@ -138,6 +138,16 @@ public class ScribanKickstartTemplateRendererTests
     }
 
     [Fact]
+    public void Render_MutesKernelConsoleLoggingToEmergOnly()
+    {
+        var rendered = CreateRenderer().Render(RhelVersionOption.Rhel98, BuildModel("dhcp"));
+
+        Assert.Contains("/etc/sysctl.d/99-console-printk.conf", rendered);
+        Assert.Contains("kernel.printk = 1 4 1 7", rendered);
+        Assert.Contains("Komunikaty kernela na konsoli wyciszone", rendered);
+    }
+
+    [Fact]
     public void Render_PlacesRebootDirectiveOutsideAnyPostSection()
     {
         var rendered = CreateRenderer().Render(RhelVersionOption.Rhel98, BuildModel("dhcp"));

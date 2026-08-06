@@ -648,6 +648,19 @@ echo '' >> /etc/fstab
 echo '# Harden /proc by mounting with hidepid' >> /etc/fstab
 echo 'proc /proc proc defaults,hidepid=2 0 0' >> /etc/fstab
 
+# [ADDITION] Wycisz komunikaty kernela/audit na konsoli (zostaw tylko emerg).
+# kernel.printk = <console_loglevel> <default_message_loglevel>
+#                  <minimum_console_loglevel> <default_console_loglevel>
+# console_loglevel=1 oznacza, ze na konsole trafiaja wylacznie komunikaty
+# o priorytecie nizszym niz 1, czyli tylko KERN_EMERG (0). To ustawienie
+# konsoli, nie kontrola dostepu do dmesg - to drugie pilnuje osobny sysctl
+# kernel.dmesg_restrict, ustawiany przez profil CIS z tailoringu.
+cat >> /etc/sysctl.d/99-console-printk.conf << 'EOF'
+kernel.printk = 1 4 1 7
+EOF
+chown root:root /etc/sysctl.d/99-console-printk.conf
+chmod 0644 /etc/sysctl.d/99-console-printk.conf
+
 # Configure the hostcritical.slice for critical service accounting and
 # add the SSH daemon to the slice.
 mkdir -p /etc/systemd/system/sshd.service.d
