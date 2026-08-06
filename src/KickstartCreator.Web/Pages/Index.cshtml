@@ -5,10 +5,6 @@
 }
 
 <h1>Nowy kickstart RHEL9 (OEMDRV)</h1>
-<p class="hint">
-    Wypelnij parametry wdrozenia. Wynikiem beda: <code>ks.cfg</code>, <code>OEMDRV.iso</code> i
-    <code>OEMDRV.img</code> do pobrania - dolacz je jako DRUGI nosnik obok niezmodyfikowanego ISO RHEL.
-</p>
 
 @if (!ViewData.ModelState.IsValid || Model.GenerationErrors.Count > 0)
 {
@@ -38,7 +34,6 @@
         <input asp-for="Form.Hostname" type="text" placeholder="ct-ma-rh9.domain.local" />
 
         <label asp-for="Form.DiskById">Dysk instalacyjny (by-id)</label>
-        <p class="hint">Pelna sciezka, np. /dev/disk/by-id/md-uuid-xxxxx - podstawiana automatycznie we wszystkich 4 miejscach w kickstarcie.</p>
         <input asp-for="Form.DiskById" type="text" placeholder="/dev/disk/by-id/..." />
     </fieldset>
 
@@ -99,7 +94,6 @@
 
     <fieldset>
         <legend>Konto root</legend>
-        <p class="hint">Konto root pozostaje zablokowane (rootpw --iscrypted --lock) - hash jest ustawiony, ale logowanie haslem jest niemozliwe (CIS L2).</p>
 
         <label>Haslo root (do zaszyfrowanego hasha)</label>
         <div class="radio-row">
