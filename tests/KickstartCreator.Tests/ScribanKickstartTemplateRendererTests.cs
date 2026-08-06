@@ -61,6 +61,47 @@ public class ScribanKickstartTemplateRendererTests
         Assert.DoesNotContain("WYBOR DYSKU DO INSTALACJI SYSTEMU", rendered);
     }
 
+    [Theory]
+    [InlineData("manual")]
+    [InlineData("interactive")]
+    public void Render_UsesOrganizationalLvmNamingConvention(string diskSelectionMode)
+    {
+        var rendered = CreateRenderer().Render(RhelVersionOption.Rhel98, BuildModel("dhcp", diskSelectionMode));
+
+        Assert.Contains("volgroup vg-system pv.system", rendered);
+        Assert.Contains("--name=lv-root --vgname=vg-system", rendered);
+        Assert.Contains("--name=lv-var --vgname=vg-system", rendered);
+        Assert.Contains("--name=lv-opt --vgname=vg-system", rendered);
+        Assert.Contains("--name=lv-tmp --vgname=vg-system", rendered);
+        Assert.Contains("--name=lv-varTmp --vgname=vg-system", rendered);
+        Assert.Contains("--name=lv-varLog --vgname=vg-system", rendered);
+        Assert.Contains("--name=lv-varLogAudit --vgname=vg-system", rendered);
+        Assert.Contains("--name=lv-swap --vgname=vg-system", rendered);
+        Assert.Contains("--name=lv-home --vgname=vg-system", rendered);
+        // Old naming must not leak back in.
+        Assert.DoesNotContain("vgname=System", rendered);
+        Assert.DoesNotContain("volgroup System", rendered);
+    }
+
+    [Theory]
+    [InlineData("manual")]
+    [InlineData("interactive")]
+    public void Render_MatchesOrganizationalFstabMountOptions(string diskSelectionMode)
+    {
+        var rendered = CreateRenderer().Render(RhelVersionOption.Rhel98, BuildModel("dhcp", diskSelectionMode));
+
+        Assert.Contains("--size=20480 --name=lv-root", rendered); // root grew from 16G to 20G
+        Assert.Contains("--fsoptions='nodev,nosuid' --name=lv-var", rendered);
+        Assert.Contains("--size=20480 --name=lv-opt --vgname=vg-system", rendered); // no fsoptions on /opt
+        Assert.Contains("--fsoptions='nodev,nosuid,noexec' --name=lv-tmp", rendered); // noexec now default on /tmp
+        Assert.Contains("--fsoptions='nodev,nosuid,noexec' --name=lv-varTmp", rendered);
+        Assert.Contains("--fsoptions='nodev,nosuid,noexec' --name=lv-varLog", rendered);
+        Assert.Contains("--fsoptions='nodev,nosuid,noexec' --name=lv-varLogAudit", rendered);
+        Assert.Contains("--fsoptions='nodev' --name=lv-home", rendered); // nosuid dropped from /home
+        Assert.Contains("umask=0077,shortname=winnt", rendered); // /boot/efi
+        Assert.Contains("tmpfs /dev/shm tmpfs defaults,nodev,nosuid,noexec 0 0", rendered);
+    }
+
     [Fact]
     public void Render_EmitsInteractiveDiskSelectionScript_WhenModeIsInteractive()
     {
