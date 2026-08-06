@@ -1,0 +1,28 @@
+services:
+  kickstart-creator:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: kickstart-creator:latest
+    ports:
+      - "8080:8080"
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      ArtifactRetention__Hours: "24"
+      BasicAuth__Enabled: "false"
+      # Uncomment to gate the app behind HTTP Basic auth instead of (or in
+      # addition to) a reverse proxy:
+      # BasicAuth__Enabled: "true"
+      # BASIC_AUTH_USER: "admin"
+      # BASIC_AUTH_PASSWORD: "change-me"
+    volumes:
+      - kickstart-artifacts:/data/artifacts
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:8080/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+volumes:
+  kickstart-artifacts:

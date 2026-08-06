@@ -1,0 +1,16 @@
+# .NET build output
+bin/
+obj/
+*.user
+
+# IDE
+.vs/
+.vscode/
+.idea/
+
+# Local dev artifact storage (appsettings.Development.json points here)
+.artifacts/
+
+# OS cruft
+.DS_Store
+Thumbs.db

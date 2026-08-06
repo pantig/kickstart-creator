@@ -1,0 +1,183 @@
+# ---------------------------------------------------------------------------
+# First-boot post-install summary: CIS L2 compliance + our own hardening
+# checklist. Generation is decoupled from display because a real `oscap
+# xccdf eval` run can take a couple of minutes - it must not block login.
+#   - kickstart-summary-generate.service (oneshot, runs once at first boot,
+#     guarded by a stamp file) produces /var/lib/kickstart-summary/report.txt
+#   - /etc/profile.d/zz-kickstart-summary.sh displays the cached report at
+#     every interactive login
+# ---------------------------------------------------------------------------
+
+mkdir -p /var/lib/kickstart-summary
+
+cat <<"KS_SUMMARY_SCRIPT_EOF" > /usr/local/sbin/kickstart-summary-generate.sh
+#!/bin/bash
+# Generates the one-time post-install summary (CIS L2 + our hardening
+# checklist). Runs once at first boot via kickstart-summary-generate.service,
+# guarded by the stamp file below - do not run manually unless you delete the
+# stamp file first (this will re-run a full oscap CIS scan, which takes a
+# couple of minutes).
+set -uo pipefail
+
+STAMP_DIR=/var/lib/kickstart-summary
+STAMP_FILE="$STAMP_DIR/.generated"
+REPORT_FILE="$STAMP_DIR/report.txt"
+mkdir -p "$STAMP_DIR"
+
+if [ -f "$STAMP_FILE" ]; then
+  exit 0
+fi
+
+{
+  echo "=================================================================="
+  echo " kickstart-creator - podsumowanie instalacji"
+  echo " $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+  echo "=================================================================="
+  echo
+
+  echo "---- CIS Level 2 (oscap xccdf eval) ----"
+  OSCAP_RESULT_XML="$STAMP_DIR/oscap-results.xml"
+  OSCAP_LOG="$STAMP_DIR/oscap-eval.log"
+  TAILORING_FILE=/root/openscap_data/cis_tailoring.xml
+  CONTENT_DS=/usr/share/xml/scap/ssg/content/ssg-rhel9-ds.xml
+
+  if ! command -v oscap >/dev/null 2>&1; then
+    echo "BLAD: brak polecenia 'oscap' - pakiet openscap-scanner nie jest zainstalowany."
+  elif [ ! -f "$TAILORING_FILE" ]; then
+    echo "BLAD: brak pliku tailoringu $TAILORING_FILE - oscap addon nie skopiowal go podczas instalacji."
+  elif [ ! -f "$CONTENT_DS" ]; then
+    echo "BLAD: brak zawartosci scap-security-guide ($CONTENT_DS)."
+  else
+    oscap xccdf eval \
+      --profile xccdf_org.ssgproject.content_profile_cis_tailored \
+      --tailoring-file "$TAILORING_FILE" \
+      --results "$OSCAP_RESULT_XML" \
+      "$CONTENT_DS" > "$OSCAP_LOG" 2>&1
+
+    if [ -f "$OSCAP_RESULT_XML" ]; then
+      PASS=$(grep -o 'result="pass"' "$OSCAP_RESULT_XML" | wc -l)
+      FAIL=$(grep -o 'result="fail"' "$OSCAP_RESULT_XML" | wc -l)
+      NOTAPPLICABLE=$(grep -o 'result="notapplicable"' "$OSCAP_RESULT_XML" | wc -l)
+      echo "PASS: $PASS   FAIL: $FAIL   N/A: $NOTAPPLICABLE"
+      echo
+      if [ "$FAIL" -gt 0 ]; then
+        echo "Niezaliczone reguly (czesc jest oczekiwana - patrz [EXCEPTION] w cis_tailoring.xml):"
+        grep -B2 'result="fail"' "$OSCAP_RESULT_XML" | grep -o 'idref="[^"]*"' | sed -E 's/idref="([^"]+)"/  - \1/' | sort -u
+      fi
+    else
+      echo "BLAD: oscap nie wygenerowal pliku wynikowego - zobacz $OSCAP_LOG"
+    fi
+  fi
+  echo
+
+  echo "---- Nasz hardening / best practices (poza standardowym CIS) ----"
+
+  check() {
+    local description="$1"
+    local status="$2"
+    if [ "$status" -eq 0 ]; then
+      printf "  [OK]   %s\n" "$description"
+    else
+      printf "  [FAIL] %s\n" "$description"
+    fi
+  }
+
+  grep -qx "Port {{ ssh_port }}" /etc/ssh/sshd_config
+  check "SSH nasluchuje na porcie {{ ssh_port }}" $?
+
+  semanage port -l 2>/dev/null | grep -q "ssh_port_t.*\b{{ ssh_port }}\b"
+  check "Port {{ ssh_port }} ma kontekst SELinux ssh_port_t" $?
+
+  grep -qx "AllowGroups sshusers" /etc/ssh/sshd_config
+  check "SSH ograniczone do grupy sshusers (CIS 5.2.2)" $?
+
+  grep -qx "X11Forwarding no" /etc/ssh/sshd_config
+  check "X11Forwarding wylaczony" $?
+
+  grep -qx "ChallengeResponseAuthentication no" /etc/ssh/sshd_config
+  check "ChallengeResponseAuthentication wylaczony" $?
+
+  grep -q "^DefaultZone=drop$" /etc/firewalld/firewalld.conf
+  check "Domyslna strefa firewalld = drop (CIS 3.4.2.4)" $?
+
+{{ for cidr in ssh_allowed_cidrs }}
+  firewall-offline-cmd --zone=sshaccess --query-source={{ cidr }} >/dev/null 2>&1
+  check "Firewalld sshaccess zawiera {{ cidr }}" $?
+{{ end }}
+
+  grep -q "hidepid=2" /etc/fstab
+  check "/proc montowany z hidepid=2" $?
+
+  [ -f /etc/cron.allow ] && [ -f /etc/at.allow ]
+  check "/etc/cron.allow i /etc/at.allow istnieja (CIS 5.1.8)" $?
+
+  [ "$(passwd -S root 2>/dev/null | awk '{print $2}')" = "L" ]
+  check "Konto root zablokowane (passwd -S root = L)" $?
+
+  getent shadow root 2>/dev/null | cut -d: -f2 | grep -qE '^\$6\$'
+  check "Konto root ma ustawiony hash hasla SHA-512 (nie jest puste)" $?
+
+  grep -qE '^\s*PASS_MAX_DAYS\s+365\s*$' /etc/login.defs
+  check "PASS_MAX_DAYS = 365 w /etc/login.defs" $?
+
+  [ "$(cat /etc/machine-id 2>/dev/null)" = "uninitialized" ]
+  check "/etc/machine-id zresetowany (obraz przygotowany do klonowania)" $?
+
+  echo
+  echo "Pelny log oscap: $OSCAP_LOG"
+  echo "=================================================================="
+} > "$REPORT_FILE" 2>&1
+
+touch "$STAMP_FILE"
+KS_SUMMARY_SCRIPT_EOF
+chown root:root /usr/local/sbin/kickstart-summary-generate.sh
+chmod 0750 /usr/local/sbin/kickstart-summary-generate.sh
+
+cat <<"KS_SUMMARY_UNIT_EOF" > /etc/systemd/system/kickstart-summary-generate.service
+[Unit]
+Description=kickstart-creator - one-time post-install summary generation
+After=network-online.target
+Wants=network-online.target
+ConditionPathExists=!/var/lib/kickstart-summary/.generated
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/kickstart-summary-generate.sh
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
+KS_SUMMARY_UNIT_EOF
+chown root:root /etc/systemd/system/kickstart-summary-generate.service
+chmod 0644 /etc/systemd/system/kickstart-summary-generate.service
+systemctl enable kickstart-summary-generate.service
+
+cat <<"KS_SUMMARY_PROFILE_EOF" > /etc/profile.d/zz-kickstart-summary.sh
+#!/bin/bash
+# Displays the cached post-install summary (CIS L2 + our best-practices
+# checklist) at interactive login. The report itself is generated once, at
+# first boot, by kickstart-summary-generate.service - see
+# /usr/local/sbin/kickstart-summary-generate.sh.
+case $- in
+  *i*) ;;
+  *) return 2>/dev/null || exit 0 ;;
+esac
+
+REPORT_FILE=/var/lib/kickstart-summary/report.txt
+STAMP_FILE=/var/lib/kickstart-summary/.generated
+
+if [ ! -f "$STAMP_FILE" ]; then
+  echo
+  echo "kickstart-creator: raport CIS L2 / best practices jeszcze sie generuje."
+  echo "Sprawdz: systemctl status kickstart-summary-generate.service"
+  echo
+elif [ -f "$REPORT_FILE" ]; then
+  GREEN='\033[0;32m'; RED='\033[0;31m'; YELLOW='\033[0;33m'; NC='\033[0m'
+  sed -e "s/\[OK\]/${GREEN}[OK]${NC}/g" \
+      -e "s/\[FAIL\]/${RED}[FAIL]${NC}/g" \
+      -e "s/^BLAD:.*/${YELLOW}&${NC}/g" \
+      "$REPORT_FILE"
+fi
+KS_SUMMARY_PROFILE_EOF
+chown root:root /etc/profile.d/zz-kickstart-summary.sh
+chmod 0644 /etc/profile.d/zz-kickstart-summary.sh

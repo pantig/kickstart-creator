@@ -1,0 +1,509 @@
+#version=RHEL9
+# Kickstart wygenerowany automatycznie przez kickstart-creator
+# Cel: {{ rhel_version_label }}
+# Wygenerowano: {{ generated_at_utc }} UTC
+#
+# NIE EDYTUJ RECZNIE - zmiany zrob w generatorze i pobierz nowy plik/OEMDRV.
+# Ten plik trafia na osobny nosnik OEMDRV, montowany OBOK stockowego ISO RHEL -
+# nie modyfikuje instalacyjnego ISO. Anaconda wykrywa OEMDRV automatycznie.
+#
+# Bazowy szablon: CIS Level 2 hardened, minimal-install, headless server
+# (partycjonowanie LVM, %addon com_redhat_oscap z profilem CIS + tailoringiem,
+# firewalld z dedykowana strefa sshaccess, konto root zablokowane haslem).
+
+# Kickstart for HeadlessCISPodman
+# Version 9.2.1 (adapted for kickstart-creator)
+
+# License agreement
+eula --agreed
+
+# Use non-interactive install
+text --non-interactive
+
+# Select a specific disk to use for safety
+ignoredisk --only-use={{ disk_by_id }}
+
+# Clear out partition tables on disks
+zerombr
+
+# Clear partitions and initialise with a label
+clearpart --all --initlabel
+
+# Create EFI System Partition and /boot partition (RHEL 8 default sizes)
+part /boot --fstype=xfs --fsoptions='nosuid,nodev' --size=1024 --ondisk={{ disk_by_id }}
+part /boot/efi --fstype=vfat --fsoptions='defaults,umask=0027,fmask=0077,uid=0,gid=0' --size=600 --ondisk={{ disk_by_id }}  # RHEL8 CIS 1.5.1
+
+# Create unencrypted partition for our LVM container
+part pv.01 --size 143360 --asprimary --ondisk={{ disk_by_id }}
+
+# Create our LVM group
+volgroup System pv.01
+
+# Create a 16GB root partition (using LVM group we just created)
+logvol / --fstype=xfs --size=16384 --name=root --vgname=System
+
+# Create a 20GB /var partition
+logvol /var --fstype=xfs --size=20480 --fsoptions='nodev' --name=var --vgname=System  # RHEL8 CIS 1.1.6
+
+# Create our smaller volumes
+logvol /opt --fstype=xfs --size=20480 --fsoptions='nodev' --name=opt --vgname=System
+logvol /tmp --fstype=xfs --size=4096 --fsoptions='nodev,nosuid' --name=tmp --vgname=System  # RHEL8 CIS 1.1.2, 1.1.3, 1.1.4
+logvol /var/tmp --fstype=xfs --size=5120 --fsoptions='nodev,noexec,nosuid' --name=vartmp --vgname=System  # RHEL8 CIS 1.1.7, 1.1.8, 1.1.9, 1.1.10
+logvol /var/log --fstype=xfs --size=10240 --fsoptions='nodev,noexec,nosuid' --name=logs --vgname=System  # RHEL8 CIS 1.1.11
+logvol /var/log/audit --fstype=xfs --size=10240 --fsoptions='nodev,noexec,nosuid' --name=auditlogs --vgname=System  # RHEL8 CIS 1.1.12
+
+# Create an 8GB swap partition
+logvol swap --fstype=swap --size=8192 --name=swap --vgname=System
+
+# Create a 10GB /home volume
+logvol /home --fstype=xfs --size=10240 --fsoptions='nodev,nosuid' --name=home --vgname=System  # RHEL8 CIS 1.1.13, CIS 1.1.14
+
+# EFI GRUB with a generated password (see kickstart-creator's GRUB PBKDF2 hashing service).
+# We enable cgroups v2 here via systemd.unified_cgroup_hierarchy=1, and enable
+# auditing from the earliest point in boot via audit=1 / audit_backlog_limit.
+bootloader --location=mbr --append="crashkernel=auto systemd.unified_cgroup_hierarchy=1 audit_backlog_limit=8192 audit=1" --iscrypted --password={{ grub_password_hash }}
+
+# Install using the booted DVD (the stock RHEL ISO, unmodified - this kickstart
+# ships separately on OEMDRV media, see the header comment).
+cdrom
+
+# Don't run the Setup Agent on first boot
+firstboot --disable
+
+# Locale
+keyboard --xlayouts='us'
+lang en_US.UTF-8
+
+# Network information
+{{ if network_mode == "dhcp" }}
+network --device=link --hostname={{ hostname }} --bootproto=dhcp --onboot=true
+{{ else }}
+network --bootproto=static --ip={{ static_ip }} --netmask={{ static_netmask }} --gateway={{ static_gateway }} --nameserver={{ static_dns }} --hostname={{ hostname }} --onboot=true
+{{ end }}
+
+# Enable firewalld and allow incoming SSH on the default 'public' zone.
+# CIS 3.4.2.4 below sets our default zone to 'drop', so this command has no
+# effect once CIS hardening applies - see the firewall-offline-cmd calls in
+# %post that specifically allow SSH on the 'drop' zone's replacement config.
+firewall --enabled --ssh
+
+# Make sure SELinux is enforcing
+selinux --enforcing
+
+# Timezone & NTP
+timezone {{ timezone }} --utc
+{{ for ntp in ntp_servers }}
+timesource --ntp-server {{ ntp }}
+{{ end }}
+
+# Lock the root account (CIS L2 - root keeps a real password hash, but
+# passwd -S root must report 'L': password login is disabled).
+rootpw --iscrypted --lock "{{ root_password_hash }}"
+
+# Create group for local users to be granted SSH access
+# (See CIS 5.2.2 - Ensure SSH access is limited)
+group --name=sshusers --gid=770
+
+# Create the admin user account
+user --name={{ admin_username }} --password="{{ admin_password_hash }}" --iscrypted --gecos="user" --groups={{ admin_groups_csv }} --uid {{ admin_uid }}
+
+# Enable kdump
+%addon com_redhat_kdump --enable --reserve-mb='auto'
+%end
+
+# Harden installation with CIS profile
+# For more details and configuration options see
+# https://access.redhat.com/documentation/en-us/red_hat_enterprise_linux/9/html-single/performing_an_advanced_rhel_installation/index#addon-org_fedora_oscap_kickstart-commands-for-addons-supplied-with-the-rhel-installation-program
+#
+# We use the preinstall script section of the Kickstart to write our
+# tailoring file to /tmp where this addon will look for it.
+%addon com_redhat_oscap
+        content-type = scap-security-guide
+        profile = xccdf_org.ssgproject.content_profile_cis
+        #tailoring-path = cis_tailoring.xml
+%end
+
+# Do not install a graphical environment
+skipx
+
+# Disable services (a single kickstart can only have one "services --disabled"
+# invocation - dnf-automatic.timer is included here rather than "--enabled"
+# because automatic updates must stay OFF on this OS due to requirements of
+# software installed on top of it).
+services --disabled="avahi-daemon.service,bluetooth.service,rhnsd.service,rhsmcertd.service,dnf-automatic.timer"
+
+# Configure packageset
+#
+# To find out the correct names to use for package groups below, run the
+# following command on an installed RHEL 9 system: sudo dnf grouplist -v
+# and prepend the desired package group with @ (or @^ for an Environment
+# Group - only a single Environment can be specified in a Kickstart).
+
+# Including minimal deployment environment
+#   - iwl*-firmware - Removed Intel Wireless NIC firmware not needed on headless systems.
+#   - plymouth      - Removed from headless installs (adds graphical boot capability we don't need).
+%packages
+@^minimal-environment
+-iwl*-firmware
+-plymouth
+
+%end
+
+# Including CIS hardening packageset
+#   + aide - Filesystem integrity checker, required by CIS 1.4.1.
+%packages
+aide
+
+%end
+
+#   - cockpit                      - Excluded (we never install/expose Cockpit).
+#   - firefox                      - Workstation installs carry this by default; excluded from base install.
+#   - setroubleshoot               - For compliance with CIS 1.7.1.6, we remove this otherwise it just gets removed after being installed.
+#   - subscription-manager-cockpit - Would try to pull in Cockpit packages we've excluded.
+#   - telnet                       - For compliance with CIS 2.3.2.
+#   + conntrack-tools              - Tools for interacting with the Conntrack layer in the Linux kernel. Useful for debugging.
+#   + dnf-automatic                - Kept installed (but its timer stays disabled - see services above) so it can be enabled later without a reinstall.
+#   + kexec-tools                  - Required by the kdump service.
+#   + lsof                         - Displays information from /proc about which processes are interacting with files. Useful for debugging.
+#   + nano                         - Text editor. Useful for editing configurations and other text files.
+#   + perf                         - Provides the perf performance-monitoring tool.
+#   + policycoreutils-python-utils - Used by a number of utilities for SELinux purposes.
+#   + python3                      - Provides Python 3.
+#   + python3-pexpect              - Required to target this machine with Ansible's 'expect' module which can simulate interactive input.
+#   + rsync                        - Allows robust file synchronisation including checksum validation.
+#   + sos                          - Provides `sos report` functionality which can capture useful system info during an incident, or be used for filing support tickets with Red Hat.
+#   + strace                       - Provides an interface to debug and trace syscalls being run by programs on the system.
+#   + sysstat                      - Provides a number of useful system utilities such as 'iostat', 'mpstat' and 'sar'. Useful for debugging.
+#   + tar                          - Archival tool. Often pulled in as a dependency but we add it explicitly to make sure it is always available.
+#   + tcpdump                      - Allows running packet captures on the host via libpcap. Useful for debugging.
+#   + yum-utils                    - Provides a number of useful utilities for working with yum/dnf packages and repositories.
+%packages
+-cockpit
+-cockpit-*
+-firefox
+-setroubleshoot
+-subscription-manager-cockpit
+-telnet
+conntrack-tools
+dnf-automatic
+kexec-tools
+lsof
+nano
+perf
+policycoreutils-python-utils
+python3
+python3-pexpect
+rsync
+sos
+strace
+sysstat
+tar
+tcpdump
+yum-utils
+vim
+openscap-scanner
+scap-security-guide
+setroubleshoot-server
+nc
+mc
+wget
+tlog
+authselect*
+sssd-proxy
+net-tools
+jq
+net-snmp-libs
+net-snmp-utils
+OpenIPMI-libs
+libpq
+unixODBC
+selinux-policy-devel
+python3-libselinux
+iotop
+systemd-journal-remote
+rsyslog-relp
+%end
+
+##################### START PREINSTALL SCRIPT #####################
+%pre --interpreter=/bin/bash --log=/tmp/pre-ks.log --erroronfail
+echo 'Hello, Kickstart!'
+
+# Import our CIS tailoring file, if present.
+#
+# We generate these with SCAP Workbench by tailoring the scap-security-guide CIS
+# profile, and saving the result with "Save Customization Only".
+#
+# It's largely undocumented behaviour, but during installation the oscap addon
+# copies the tailoring file from /tmp/openscap_data to /root/openscap_data in
+# the installed system's chroot - our first-boot summary script (see %post)
+# relies on it being there to re-run the same profile/tailoring post-install.
+#
+# We have to do this here and not in %post because %post runs after the oscap
+# addon does.
+[ -d /tmp/openscap_data/ ] || /bin/mkdir -m 755 /tmp/openscap_data
+cat <<"EOF" > /tmp/openscap_data/cis_tailoring.xml
+<?xml version="1.0" encoding="UTF-8"?>
+<xccdf:Tailoring xmlns:xccdf="http://checklists.nist.gov/xccdf/1.2" id="xccdf_scap-workbench_tailoring_default">
+  <xccdf:benchmark href="ssg-rhel9-ds.xml"/>
+  <xccdf:version time="1980-01-01T00:00:00">1</xccdf:version>
+  <xccdf:Profile id="xccdf_org.ssgproject.content_profile_cis_tailored" extends="xccdf_org.ssgproject.content_profile_cis">
+    <xccdf:title xmlns:xhtml="http://www.w3.org/1999/xhtml" xml:lang="en-US" override="true">CIS Red Hat Enterprise Linux 9 Benchmark [Tailored]</xccdf:title>
+    <xccdf:description xmlns:xhtml="http://www.w3.org/1999/xhtml" xml:lang="en-US" override="true">CIS Profile for RHEL 9 [Tailored]</xccdf:description>
+    <!---->
+
+    <!-- [EXCEPTION] CIS 1.1.5 Ensure noexec option set on /tmp partition -->
+    <xccdf:select idref="xccdf_org.ssgproject.content_rule_mount_option_tmp_noexec" selected="false"/>
+
+    <!-- [EXCEPTION] CIS 1.11 Ensure system-wide crypto policy is FUTURE or FIPS -->
+    <!-- Disabling this means we keep the default of DEFAULT, which is our preference -->
+    <xccdf:select idref="xccdf_org.ssgproject.content_rule_configure_crypto_policy" selected="false"/>
+
+    <!-- [TWEAKS] CIS 1.8.1.1 Ensure message of the day is configured properly -->
+    <!-- We don't want the default US Government text from these banners -->
+    <xccdf:select idref="xccdf_org.ssgproject.content_rule_banner_etc_motd" selected="false"/>
+
+    <!-- [TWEAKS] CIS 1.8.1.2 Ensure local login warning banner is configured properly -->
+    <!-- We don't want the default US Government text from these banners -->
+    <xccdf:select idref="xccdf_org.ssgproject.content_rule_banner_etc_issue" selected="false"/>
+
+    <!-- [TWEAKS] CIS 4.1.2.1 Ensure audit log storage size is configured -->
+    <xccdf:set-value idref="xccdf_org.ssgproject.content_value_var_auditd_max_log_file">10</xccdf:set-value>
+    <xccdf:set-value idref="xccdf_org.ssgproject.content_value_var_auditd_num_logs">100</xccdf:set-value>
+
+    <!-- [EXCEPTION] CIS 4.1.2.2 Ensure audit logs are not automatically deleted -->
+    <xccdf:set-value idref="xccdf_org.ssgproject.content_value_var_auditd_max_log_file_action">rotate</xccdf:set-value>
+
+    <!-- [EXCEPTION] CIS 4.1.2.3 Ensure system is disabled when audit logs are full -->
+    <xccdf:set-value idref="xccdf_org.ssgproject.content_value_var_auditd_space_left_action">syslog</xccdf:set-value>
+    <xccdf:set-value idref="xccdf_org.ssgproject.content_value_var_auditd_admin_space_left_action">syslog</xccdf:set-value>
+
+    <!-- [EXCEPTION] CIS 4.2.1.5 Ensure rsyslog is configured to send logs to a remote log host -->
+    <xccdf:select idref="xccdf_org.ssgproject.content_rule_rsyslog_remote_loghost" selected="false"/>
+
+    <!-- [EXCEPTION] CIS 5.2.13 Ensure SSH Idle Timeout Interval is configured -->
+    <xccdf:select idref="xccdf_org.ssgproject.content_rule_sshd_set_idle_timeout" selected="false"/>
+
+    <!-- [EXCEPTION] CIS 5.5.3 Ensure default user shell timeout is 900 seconds or less -->
+    <xccdf:select idref="xccdf_org.ssgproject.content_rule_accounts_tmout" selected="false"/>
+
+    <!-- [ADDITION] Restrict access to kernel message buffer -->
+    <xccdf:select idref="xccdf_org.ssgproject.content_rule_sysctl_kernel_dmesg_restrict" selected="true"/>
+
+    <!-- [ADDITION] Harden the operation of the BPF just-in-time compiler -->
+    <xccdf:select idref="xccdf_org.ssgproject.content_rule_sysctl_net_core_bpf_jit_harden" selected="true"/>
+
+    <!-- [ADDITION] Disallow Magic SysRq Key -->
+    <xccdf:select idref="xccdf_org.ssgproject.content_rule_sysctl_kernel_sysrq" selected="true"/>
+
+    <!-- [ADDITION] Disable rhsmcertd service -->
+    <xccdf:select idref="xccdf_org.ssgproject.content_rule_service_rhsmcertd_disabled" selected="true"/>
+
+    <!-- [ADDITION] Disable Bluetooth service and kernel module -->
+    <xccdf:select idref="xccdf_org.ssgproject.content_rule_service_bluetooth_disabled" selected="true"/>
+    <xccdf:select idref="xccdf_org.ssgproject.content_rule_kernel_module_bluetooth_disabled" selected="true"/>
+
+    <!-- [ADDITION] Disable Access to Network bpf() Syscall From Unprivileged Processes -->
+    <xccdf:select idref="xccdf_org.ssgproject.content_rule_sysctl_kernel_unprivileged_bpf_disabled" selected="true"/>
+
+    <!-- [ADDITION] Restrict access to kernel pointers via /proc and other interfaces -->
+    <xccdf:select idref="xccdf_org.ssgproject.content_rule_sysctl_kernel_kptr_restrict" selected="true"/>
+
+    <!-- [ADDITION] Disable loading of kernel modules -->
+    <xccdf:select idref="xccdf_org.ssgproject.content_rule_sysctl_kernel_modules_disabled" selected="true"/>
+
+    <!-- [ADDITION] Disallow some ftrace and kernel profiling features for users without CAP_SYS_ADMIN -->
+    <xccdf:select idref="xccdf_org.ssgproject.content_rule_sysctl_kernel_perf_event_paranoid" selected="true"/>
+
+    <!-- [ADDITION] Restrict use of ptrace -->
+    <xccdf:select idref="xccdf_org.ssgproject.content_rule_sysctl_kernel_yama_ptrace_scope" selected="true"/>
+
+    <!-- [ADDITION] Ensure chrony is installed and enabled for timesync -->
+    <xccdf:select idref="xccdf_org.ssgproject.content_rule_service_chronyd_enabled" selected="true"/>
+    <xccdf:select idref="xccdf_org.ssgproject.content_rule_package_chrony_installed" selected="true"/>
+
+    <!-- [ADDITION] Stop chronyd listening on UDP 323 port for network management purposes -->
+    <xccdf:select idref="xccdf_org.ssgproject.content_rule_chronyd_no_chronyc_network" selected="true"/>
+
+    <!-- [ADDITION] Ensure chronyd is not allowed to act as a timeserver -->
+    <xccdf:select idref="xccdf_org.ssgproject.content_rule_chronyd_client_only" selected="true"/>
+
+    <!---->
+  </xccdf:Profile>
+</xccdf:Tailoring>
+
+EOF
+
+%end
+##################### END PREINSTALL SCRIPT #####################
+
+##################### START POSTINSTALL SCRIPT #####################
+%post --logfile=/root/anaconda-post.log --erroronfail
+
+# Subscription registration and EPEL are deliberately NOT done here - install
+# is fully offline. Handle registration/EPEL post-install (e.g. via Ansible).
+
+echo 'Hello, Kickstart!'
+
+# Here we implement CIS controls or tweaks which are still needed even
+# though we're using the CIS OpenSCAP profile above via ComplianceAsCode.
+#
+# Key:
+#   [ADDITION]  - Controls which do not belong to CIS but which are set anyway as they are generally desirable for security.
+#   [CISBUG]    - Controls which FAIL a CIS CAT Assessor validation due to bugs in Assessor/its logic, but are actually applied properly.
+#   [EXCEPTION] - Controls which FAIL a CIS CAT Assessor validation because we specifically do not want them applied (rationale inline).
+#   [SCAPBUG]   - Controls which PASS a CIS CAT Assessor validation but not without the additional tweaks below (the OpenSCAP profile doesn't apply them properly on its own).
+#   [TWEAKS]    - Controls which PASS a CIS CAT Assessor validation but which we tweak here to be specific to our environment.
+
+# [EXCEPTION] CIS 1.1.1.2 Ensure mounting of vFAT filesystems is limited
+# Disabling vFAT means the FAT-formatted EFI ESP cannot be mounted and the
+# whole boot process fails for RHEL systems deployed using UEFI.
+
+# [EXCEPTION] CIS 1.1.5 Ensure noexec option set on /tmp partition
+# This rule breaks far too much software (Satellite, many Ansible modules).
+
+# [EXCEPTION] CIS 1.11 Ensure system-wide crypto policy is FUTURE or FIPS
+# FUTURE/FIPS is not intended for general purpose systems per Red Hat's own
+# guidance, and breaks compatibility with shorter RSA keys used elsewhere in
+# our environment. CIS 1.10 (crypto policy is not LEGACY) is still satisfied.
+
+# [CISBUG] CIS 1.5.1 Ensure permissions on bootloader config are configured
+# The CIS requirement's assumed GRUB config location doesn't hold true on EFI installs.
+test -f /boot/efi/EFI/redhat/grub.cfg && chown root:root /boot/efi/EFI/redhat/grub.cfg
+test -f /boot/efi/EFI/redhat/grub.cfg && chmod og-rwx /boot/efi/EFI/redhat/grub.cfg
+test -f /boot/efi/EFI/redhat/grubenv && chown root:root /boot/efi/EFI/redhat/grubenv
+test -f /boot/efi/EFI/redhat/grubenv && chmod og-rwx /boot/efi/EFI/redhat/grubenv
+test -f /boot/grub2/grubenv && chown root:root /boot/grub2/grubenv
+test -f /boot/grub2/grubenv && chmod og-rwx /boot/grub2/grubenv
+
+# [TWEAKS] CIS 1.8.1.1 / 1.8.1.4 - custom MOTD (generic text, not US-Gov specific)
+cat <<"EOF" > /etc/motd
+
+Authorized users only. All activity may be monitored and reported.
+
+EOF
+chown root:root /etc/motd
+chmod u-x,go-wx /etc/motd
+
+# [TWEAKS] CIS 1.8.1.2 / 1.8.1.5 - custom /etc/issue
+cat <<"EOF" > /etc/issue
+
+Authorized users only. All activity may be monitored and reported.
+
+EOF
+chown root:root /etc/issue
+chmod u-x,go-wx /etc/issue
+
+# [TWEAKS] CIS 1.8.1.3 / 1.8.1.6 - custom /etc/issue.net
+cat <<"EOF" > /etc/issue.net
+
+Authorized users only. All activity may be monitored and reported.
+
+EOF
+chown root:root /etc/issue.net
+chmod u-x,go-wx /etc/issue.net
+
+# [SCAPBUG] CIS 3.4.2.4 Ensure default zone is set
+# CaC doesn't remediate this one during install, so we do it ourselves:
+sed -i 's/^DefaultZone=.*/DefaultZone=drop/g' /etc/firewalld/firewalld.conf
+#
+# Since we're changing the default zone here, any 'firewall' commands used
+# earlier in this Kickstart (which operate on 'public') won't have effect -
+# we use 'firewall-offline-cmd' here to configure the rules we actually want:
+
+firewall-offline-cmd --zone=drop
+firewall-offline-cmd --new-zone=sshaccess
+{{ for cidr in ssh_allowed_cidrs }}
+firewall-offline-cmd --zone=sshaccess --add-source={{ cidr }}
+{{ end }}
+firewall-offline-cmd --zone=sshaccess --add-port={{ ssh_port }}/tcp
+firewall-offline-cmd --zone=trusted --add-interface=lo
+firewall-offline-cmd --zone=trusted --add-rich-rule='rule family=ipv4 source address="127.0.0.1" destination not address="127.0.0.1" drop'
+firewall-offline-cmd --zone=trusted --add-rich-rule='rule family=ipv6 source address="::1" destination not address="::1" drop'
+
+# [SCAPBUG] CIS 5.1.8 Ensure at/cron is restricted to authorized users
+test -f /etc/cron.deny && rm /etc/cron.deny
+test -f /etc/at.deny && rm /etc/at.deny
+touch /etc/cron.allow
+touch /etc/at.allow
+chmod og-rwx /etc/cron.allow
+chmod og-rwx /etc/at.allow
+chown root:root /etc/cron.allow
+chown root:root /etc/at.allow
+
+# SSH hardening - port, SELinux context, and sshd_config tweaks.
+semanage port -a -t ssh_port_t -p tcp {{ ssh_port }}
+sed -i '/.*Port.*/d' /etc/ssh/sshd_config
+echo '' >> /etc/ssh/sshd_config
+echo "#Listen SSHD on port {{ ssh_port }}" >> /etc/ssh/sshd_config
+echo "Port {{ ssh_port }}" >> /etc/ssh/sshd_config
+
+sed -i '/.*X11Forwarding.*/d' /etc/ssh/sshd_config
+echo '' >> /etc/ssh/sshd_config
+echo "#Disable X11 Forwarding" >> /etc/ssh/sshd_config
+echo "X11Forwarding no" >> /etc/ssh/sshd_config
+
+sed -i '/.*UsePam.*/d' /etc/ssh/sshd_config
+echo '' >> /etc/ssh/sshd_config
+echo "#UsePam" >> /etc/ssh/sshd_config
+echo "UsePam yes" >> /etc/ssh/sshd_config
+
+sed -i '/.*ChallengeResponseAuthentication.*/d' /etc/ssh/sshd_config
+echo '' >> /etc/ssh/sshd_config
+echo "#ChallengeResponseAuthentication disabled - no MFA backend configured" >> /etc/ssh/sshd_config
+echo "ChallengeResponseAuthentication no" >> /etc/ssh/sshd_config
+
+# [SCAPBUG] CIS 5.2.2 - Ensure SSH access is limited (to the sshusers group)
+sed -i '/.*AllowGroups.*/d' /etc/ssh/sshd_config
+echo '' >> /etc/ssh/sshd_config
+echo '# CIS 5.2.2 - Ensure SSH access is limited' >> /etc/ssh/sshd_config
+echo 'AllowGroups sshusers' >> /etc/ssh/sshd_config
+
+echo '' >> /etc/ssh/sshd_config
+echo "#Other customizations" >> /etc/ssh/sshd_config
+echo "MaxSessions 2" >> /etc/ssh/sshd_config
+echo "AllowAgentForwarding no" >> /etc/ssh/sshd_config
+echo "TCPKeepAlive no" >> /etc/ssh/sshd_config
+
+# [TWEAKS] CIS 5.5.1.1 / 5.5.1.2 - password aging must apply to accounts that
+# already existed before the OpenSCAP profile changed the login.defs defaults.
+chage --lastday $(date --iso-8601) --mindays 7 --maxdays 365 {{ admin_username }}
+chage --lastday $(date --iso-8601) --mindays 7 --maxdays 365 root
+
+# [SCAPBUG] CIS 5.7 Ensure access to the su command is restricted
+echo 'auth required pam_wheel.so use_uid' >> /etc/pam.d/su
+
+# [ADDITION] Harden /proc with hidepid
+echo '' >> /etc/fstab
+echo '# Harden /proc by mounting with hidepid' >> /etc/fstab
+echo 'proc /proc proc defaults,hidepid=2 0 0' >> /etc/fstab
+
+# Configure the hostcritical.slice for critical service accounting and
+# add the SSH daemon to the slice.
+mkdir -p /etc/systemd/system/sshd.service.d
+cat <<"EOF" > /etc/systemd/system/sshd.service.d/00-slice.conf
+[Service]
+Slice=hostcritical.slice
+MemoryLow=192M
+EOF
+chown root:root /etc/systemd/system/sshd.service.d/00-slice.conf
+chmod 0640 /etc/systemd/system/sshd.service.d/00-slice.conf
+
+mkdir -p /etc/systemd/system.control/hostcritical.slice.d
+cat <<"EOF" > /etc/systemd/system.control/hostcritical.slice.d/00-MemoryLow.conf
+[Slice]
+MemoryLow=192M
+EOF
+chown root:root /etc/systemd/system.control/hostcritical.slice.d/00-MemoryLow.conf
+chmod 0640 /etc/systemd/system.control/hostcritical.slice.d/00-MemoryLow.conf
+
+{{ include "_post-install-summary.sbn" }}
+
+# Remove machine-id on pre-generated images
+# See: https://www.freedesktop.org/software/systemd/man/machine-id.html
+rm -fv /etc/machine-id
+echo 'uninitialized' > /etc/machine-id
+
+# Reboot if we want to carry out post-install actions
+reboot --eject
+%end
+##################### END POSTINSTALL SCRIPT #####################

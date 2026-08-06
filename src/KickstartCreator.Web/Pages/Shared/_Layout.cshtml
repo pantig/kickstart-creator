@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>@(ViewData["Title"] as string ?? "kickstart-creator")</title>
+    <link rel="stylesheet" href="~/css/site.css" />
+</head>
+<body>
+    <header class="site-header">
+        <div class="container">
+            <a class="brand" href="/">kickstart-creator</a>
+            <span class="tagline">generator OEMDRV z kickstartem RHEL9 (CIS L2)</span>
+        </div>
+    </header>
+    <main class="container">
+        @RenderBody()
+    </main>
+    <footer class="site-footer">
+        <div class="container">
+            Wewnetrzne narzedzie - nie modyfikuje ani nie dystrybuuje licencjonowanego ISO RHEL.
+        </div>
+    </footer>
+</body>
+</html>

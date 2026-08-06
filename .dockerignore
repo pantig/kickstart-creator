@@ -1,0 +1,9 @@
+**/bin/
+**/obj/
+**/.vs/
+**/.vscode/
+**/.artifacts/
+.git/
+.claude/
+tests/
+*.sln

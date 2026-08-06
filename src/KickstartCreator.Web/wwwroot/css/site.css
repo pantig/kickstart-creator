@@ -1,0 +1,220 @@
+:root {
+  color-scheme: light dark;
+  --bg: #f5f6f8;
+  --panel: #ffffff;
+  --text: #1b1f24;
+  --muted: #5b6472;
+  --border: #d7dce3;
+  --accent: #205493;
+  --accent-contrast: #ffffff;
+  --danger-bg: #fdecea;
+  --danger-border: #f2b8b5;
+  --danger-text: #7a1f1a;
+  --ok-bg: #e9f7ef;
+  --ok-border: #b7e4c7;
+  --ok-text: #1e5631;
+  --warn-bg: #fff8e6;
+  --warn-border: #f0d38b;
+  --warn-text: #7a5a00;
+  --radius: 8px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #14171c;
+    --panel: #1c2028;
+    --text: #e7eaee;
+    --muted: #9aa4b2;
+    --border: #333a45;
+    --accent: #5b9bd5;
+    --accent-contrast: #0b1220;
+    --danger-bg: #3a1a18;
+    --danger-border: #6b2b27;
+    --danger-text: #f5b8b3;
+    --ok-bg: #12301f;
+    --ok-border: #235c3a;
+    --ok-text: #a8e6bd;
+    --warn-bg: #362b0c;
+    --warn-border: #5c4a12;
+    --warn-text: #f0d38b;
+  }
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  line-height: 1.5;
+}
+
+.container {
+  max-width: 840px;
+  margin: 0 auto;
+  padding: 0 1.25rem;
+}
+
+.site-header {
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+  padding: 1rem 0;
+}
+
+.site-header .container {
+  display: flex;
+  align-items: baseline;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.brand {
+  font-weight: 700;
+  font-size: 1.1rem;
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.tagline {
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+main.container {
+  padding-top: 2rem;
+  padding-bottom: 3rem;
+}
+
+.site-footer {
+  color: var(--muted);
+  font-size: 0.8rem;
+  padding: 1.5rem 0 2rem;
+}
+
+fieldset {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1rem 1.25rem 1.25rem;
+  margin: 0 0 1.25rem;
+  background: var(--panel);
+}
+
+legend {
+  font-weight: 600;
+  padding: 0 0.4rem;
+}
+
+label {
+  display: block;
+  font-weight: 500;
+  margin: 0.75rem 0 0.25rem;
+}
+
+.hint {
+  color: var(--muted);
+  font-size: 0.85rem;
+  margin: 0.1rem 0 0.4rem;
+}
+
+input[type="text"],
+input[type="number"],
+input[type="password"],
+select,
+textarea {
+  width: 100%;
+  padding: 0.5rem 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 0.95rem;
+}
+
+textarea {
+  min-height: 4.5rem;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+}
+
+.radio-row {
+  display: flex;
+  gap: 1.25rem;
+  align-items: center;
+  margin-top: 0.4rem;
+}
+
+.radio-row label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-weight: 400;
+  margin: 0;
+}
+
+button, .btn {
+  display: inline-block;
+  background: var(--accent);
+  color: var(--accent-contrast);
+  border: none;
+  border-radius: 6px;
+  padding: 0.65rem 1.4rem;
+  font-size: 1rem;
+  font-weight: 600;
+  cursor: pointer;
+  text-decoration: none;
+}
+
+button:hover, .btn:hover { opacity: 0.9; }
+
+.validation-summary,
+.alert {
+  border-radius: var(--radius);
+  padding: 0.9rem 1.1rem;
+  margin-bottom: 1.25rem;
+  border: 1px solid;
+}
+
+.alert-danger, .validation-summary {
+  background: var(--danger-bg);
+  border-color: var(--danger-border);
+  color: var(--danger-text);
+}
+
+.alert-warning {
+  background: var(--warn-bg);
+  border-color: var(--warn-border);
+  color: var(--warn-text);
+}
+
+.alert-success {
+  background: var(--ok-bg);
+  border-color: var(--ok-border);
+  color: var(--ok-text);
+}
+
+.secret-box {
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 1.05rem;
+  background: var(--bg);
+  border: 1px dashed var(--border);
+  border-radius: 6px;
+  padding: 0.5rem 0.75rem;
+  display: inline-block;
+  user-select: all;
+}
+
+.download-list {
+  list-style: none;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin: 1rem 0 1.5rem;
+}
+
+.field-error {
+  color: var(--danger-text);
+  font-size: 0.85rem;
+}
+
+[hidden] { display: none !important; }

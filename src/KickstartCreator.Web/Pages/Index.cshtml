@@ -1,0 +1,163 @@
+@page
+@model KickstartCreator.Web.Pages.IndexModel
+@{
+    ViewData["Title"] = "Nowy kickstart";
+}
+
+<h1>Nowy kickstart RHEL9 (OEMDRV)</h1>
+<p class="hint">
+    Wypelnij parametry wdrozenia. Wynikiem beda: <code>ks.cfg</code>, <code>OEMDRV.iso</code> i
+    <code>OEMDRV.img</code> do pobrania - dolacz je jako DRUGI nosnik obok niezmodyfikowanego ISO RHEL.
+</p>
+
+@if (!ViewData.ModelState.IsValid || Model.GenerationErrors.Count > 0)
+{
+    <div class="validation-summary">
+        <strong>Popraw ponizsze bledy:</strong>
+        <ul>
+            @foreach (var entry in ViewData.ModelState.Values.SelectMany(v => v.Errors))
+            {
+                <li>@entry.ErrorMessage</li>
+            }
+            @foreach (var error in Model.GenerationErrors)
+            {
+                <li>@error</li>
+            }
+        </ul>
+    </div>
+}
+
+<form method="post" novalidate>
+    <fieldset>
+        <legend>Cel instalacji</legend>
+
+        <label asp-for="Form.RhelVersion">Wersja RHEL</label>
+        <select asp-for="Form.RhelVersion" asp-items="Html.GetEnumSelectList<RhelVersionOption>()"></select>
+
+        <label asp-for="Form.Hostname">Hostname</label>
+        <input asp-for="Form.Hostname" type="text" placeholder="ct-ma-rh9.domain.local" />
+
+        <label asp-for="Form.DiskById">Dysk instalacyjny (by-id)</label>
+        <p class="hint">Pelna sciezka, np. /dev/disk/by-id/md-uuid-xxxxx - podstawiana automatycznie we wszystkich 4 miejscach w kickstarcie.</p>
+        <input asp-for="Form.DiskById" type="text" placeholder="/dev/disk/by-id/..." />
+    </fieldset>
+
+    <fieldset>
+        <legend>Siec</legend>
+
+        <div class="radio-row" id="network-mode-radios">
+            <label><input type="radio" asp-for="Form.NetworkMode" value="Dhcp" /> DHCP</label>
+            <label><input type="radio" asp-for="Form.NetworkMode" value="Static" /> Statyczny adres IP</label>
+        </div>
+
+        <div id="static-network-fields">
+            <label asp-for="Form.StaticIp">Adres IP</label>
+            <input asp-for="Form.StaticIp" type="text" placeholder="10.0.2.15" />
+
+            <label asp-for="Form.StaticNetmask">Maska sieci</label>
+            <input asp-for="Form.StaticNetmask" type="text" placeholder="255.255.255.0" />
+
+            <label asp-for="Form.StaticGateway">Brama</label>
+            <input asp-for="Form.StaticGateway" type="text" placeholder="10.0.2.254" />
+
+            <label asp-for="Form.StaticDns">DNS</label>
+            <input asp-for="Form.StaticDns" type="text" placeholder="10.0.2.1" />
+        </div>
+    </fieldset>
+
+    <fieldset>
+        <legend>SSH</legend>
+
+        <label asp-for="Form.SshAllowedCidrsRaw">Dozwolone zrodlowe CIDR (jeden na linie)</label>
+        <textarea asp-for="Form.SshAllowedCidrsRaw" placeholder="10.41.202.11/32&#10;10.41.205.11/32"></textarea>
+
+        <label asp-for="Form.SshPort">Port SSH</label>
+        <input asp-for="Form.SshPort" type="number" min="1" max="65535" />
+    </fieldset>
+
+    <fieldset>
+        <legend>Konto administracyjne</legend>
+
+        <label asp-for="Form.AdminUsername">Nazwa uzytkownika</label>
+        <input asp-for="Form.AdminUsername" type="text" placeholder="focas" />
+
+        <label asp-for="Form.AdminUid">UID</label>
+        <input asp-for="Form.AdminUid" type="number" />
+
+        <label asp-for="Form.AdminExtraGroupsRaw">Dodatkowe grupy (poza wheel,sshusers - przecinki)</label>
+        <input asp-for="Form.AdminExtraGroupsRaw" type="text" placeholder="np. adm,docker" />
+
+        <label>Haslo uzytkownika</label>
+        <div class="radio-row">
+            <label><input type="radio" asp-for="Form.AdminPasswordMode" value="Generate" class="pw-mode" data-target="admin-password-field" /> Wygeneruj automatycznie</label>
+            <label><input type="radio" asp-for="Form.AdminPasswordMode" value="Manual" class="pw-mode" data-target="admin-password-field" /> Podaj recznie</label>
+        </div>
+        <div id="admin-password-field">
+            <input asp-for="Form.AdminPassword" type="password" autocomplete="new-password" />
+        </div>
+    </fieldset>
+
+    <fieldset>
+        <legend>Konto root</legend>
+        <p class="hint">Konto root pozostaje zablokowane (rootpw --iscrypted --lock) - hash jest ustawiony, ale logowanie haslem jest niemozliwe (CIS L2).</p>
+
+        <label>Haslo root (do zaszyfrowanego hasha)</label>
+        <div class="radio-row">
+            <label><input type="radio" asp-for="Form.RootPasswordMode" value="Generate" class="pw-mode" data-target="root-password-field" /> Wygeneruj automatycznie</label>
+            <label><input type="radio" asp-for="Form.RootPasswordMode" value="Manual" class="pw-mode" data-target="root-password-field" /> Podaj recznie</label>
+        </div>
+        <div id="root-password-field">
+            <input asp-for="Form.RootPassword" type="password" autocomplete="new-password" />
+        </div>
+    </fieldset>
+
+    <fieldset>
+        <legend>GRUB</legend>
+
+        <label>Haslo GRUB</label>
+        <div class="radio-row">
+            <label><input type="radio" asp-for="Form.GrubPasswordMode" value="Generate" class="pw-mode" data-target="grub-password-field" /> Wygeneruj automatycznie</label>
+            <label><input type="radio" asp-for="Form.GrubPasswordMode" value="Manual" class="pw-mode" data-target="grub-password-field" /> Podaj recznie</label>
+        </div>
+        <div id="grub-password-field">
+            <input asp-for="Form.GrubPassword" type="password" autocomplete="new-password" />
+        </div>
+    </fieldset>
+
+    <fieldset>
+        <legend>Czas</legend>
+
+        <label asp-for="Form.Timezone">Strefa czasowa</label>
+        <input asp-for="Form.Timezone" type="text" />
+
+        <label asp-for="Form.NtpServersRaw">Serwery NTP (jeden na linie)</label>
+        <textarea asp-for="Form.NtpServersRaw"></textarea>
+    </fieldset>
+
+    <button type="submit">Wygeneruj kickstart</button>
+</form>
+
+<script>
+  (function () {
+    function toggleGroup(radios, mapping) {
+      function update() {
+        for (const [value, targetId] of Object.entries(mapping)) {
+          const target = document.getElementById(targetId);
+          if (!target) continue;
+          const active = radios.some(r => r.checked && r.value === value);
+          target.hidden = !active;
+        }
+      }
+      radios.forEach(r => r.addEventListener('change', update));
+      update();
+    }
+
+    var networkRadios = Array.from(document.querySelectorAll('#network-mode-radios input[type=radio]'));
+    toggleGroup(networkRadios, { Static: 'static-network-fields' });
+
+    document.querySelectorAll('.pw-mode').forEach(function (radio) {
+      var group = Array.from(document.querySelectorAll('.pw-mode[name="' + radio.name + '"]'));
+      toggleGroup(group, { Manual: radio.dataset.target });
+    });
+  })();
+</script>

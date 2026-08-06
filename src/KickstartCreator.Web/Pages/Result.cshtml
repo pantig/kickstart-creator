@@ -1,0 +1,62 @@
+@page "{id:guid}"
+@model KickstartCreator.Web.Pages.ResultModel
+@{
+    ViewData["Title"] = "Wygenerowano kickstart";
+    var labels = new Dictionary<string, string>
+    {
+        ["admin"] = "Haslo uzytkownika",
+        ["root"] = "Haslo root (zaszyfrowane w ks.cfg, konto zablokowane)",
+        ["grub"] = "Haslo GRUB",
+    };
+}
+
+@if (!Model.Found)
+{
+    <div class="alert alert-danger">
+        <strong>Nie znaleziono tego generowania.</strong>
+        <p>Link mogl wygasnac (retencja: @Model.RetentionHours h) albo aplikacja zostala zrestartowana. Wygeneruj kickstart ponownie.</p>
+    </div>
+    <a class="btn" href="/">Wroc do formularza</a>
+    return;
+}
+
+<h1>Kickstart gotowy: @Model.ArtifactSet!.Hostname</h1>
+
+@if (Model.PlaintextSecrets.Count > 0)
+{
+    <div class="alert alert-warning">
+        <strong>Zapisz te hasla teraz w managerze hasel.</strong>
+        <p>Nie sa nigdzie zapisane na serwerze - po rozpoczeciu pobierania KTOREGOKOLWIEK z plikow ponizej
+           zostana trwale usuniete z pamieci aplikacji i nie da sie ich ponownie wyswietlic.</p>
+        <ul>
+            @foreach (var kvp in Model.PlaintextSecrets)
+            {
+                <li>
+                    @(labels.TryGetValue(kvp.Key, out var label) ? label : kvp.Key):
+                    <span class="secret-box">@kvp.Value</span>
+                </li>
+            }
+        </ul>
+    </div>
+}
+else
+{
+    <div class="alert alert-success">
+        Wszystkie hasla zostaly podane recznie (lub zostaly juz raz pobrane i wyczyszczone z serwera) - nie ma tu nic wiecej do pokazania.
+    </div>
+}
+
+<h2>Pliki do pobrania</h2>
+<p class="hint">
+    Zamontuj <code>OEMDRV.iso</code> (lub <code>OEMDRV.img</code> na USB/floppy) jako DRUGI nosnik
+    obok niezmodyfikowanego, oficjalnego ISO RHEL - Anaconda wykryje wolumen OEMDRV automatycznie.
+    Pliki znikna z serwera po @Model.RetentionHours h.
+</p>
+<ul class="download-list">
+    <li><a class="btn" href="/artifacts/@Model.ArtifactSet.Id/ks.cfg">ks.cfg</a></li>
+    <li><a class="btn" href="/artifacts/@Model.ArtifactSet.Id/oemdrv.iso">OEMDRV.iso</a></li>
+    <li><a class="btn" href="/artifacts/@Model.ArtifactSet.Id/oemdrv.img">OEMDRV.img</a></li>
+    <li><a class="btn" href="/artifacts/@Model.ArtifactSet.Id/all.zip">Wszystko (.zip)</a></li>
+</ul>
+
+<a href="/">Wygeneruj kolejny kickstart</a>
