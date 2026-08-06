@@ -14,7 +14,11 @@ public sealed class KickstartTemplateModel
 
     public required string GeneratedAtUtc { get; init; }
 
-    public required string DiskById { get; init; }
+    /// <summary>Either "interactive" (operator picks the disk at %pre time) or "manual" (baked-in DiskById).</summary>
+    public required string DiskSelectionMode { get; init; }
+
+    /// <summary>Only set when <see cref="DiskSelectionMode"/> is "manual".</summary>
+    public string? DiskById { get; init; }
 
     public required string Hostname { get; init; }
 

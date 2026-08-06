@@ -33,8 +33,15 @@
         <label asp-for="Form.Hostname">Hostname</label>
         <input asp-for="Form.Hostname" type="text" placeholder="ct-ma-rh9.domain.local" />
 
-        <label asp-for="Form.DiskById">Dysk instalacyjny (by-id)</label>
-        <input asp-for="Form.DiskById" type="text" placeholder="/dev/disk/by-id/..." />
+        <label>Wybor dysku instalacyjnego</label>
+        <div class="radio-row" id="disk-mode-radios">
+            <label><input type="radio" asp-for="Form.DiskSelectionMode" value="Interactive" /> Interaktywnie podczas instalacji (domyslnie)</label>
+            <label><input type="radio" asp-for="Form.DiskSelectionMode" value="Manual" /> Podaj z gory (by-id)</label>
+        </div>
+        <div id="manual-disk-field">
+            <label asp-for="Form.DiskById">Dysk instalacyjny (by-id)</label>
+            <input asp-for="Form.DiskById" type="text" placeholder="/dev/disk/by-id/..." />
+        </div>
     </fieldset>
 
     <fieldset>
@@ -145,6 +152,9 @@
       radios.forEach(r => r.addEventListener('change', update));
       update();
     }
+
+    var diskModeRadios = Array.from(document.querySelectorAll('#disk-mode-radios input[type=radio]'));
+    toggleGroup(diskModeRadios, { Manual: 'manual-disk-field' });
 
     var networkRadios = Array.from(document.querySelectorAll('#network-mode-radios input[type=radio]'));
     toggleGroup(networkRadios, { Static: 'static-network-fields' });

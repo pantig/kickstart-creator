@@ -23,11 +23,12 @@ public class ScribanKickstartTemplateRendererTests
         return Path.GetFullPath(Path.Combine(testDir, "..", "..", "src", "KickstartCreator.Web", "Templates"));
     }
 
-    private static KickstartTemplateModel BuildModel(string networkMode) => new()
+    private static KickstartTemplateModel BuildModel(string networkMode, string diskSelectionMode = "manual") => new()
     {
         RhelVersionLabel = "RHEL 9.8",
         GeneratedAtUtc = "2026-01-01 00:00:00",
-        DiskById = "/dev/disk/by-id/md-uuid-TESTDISK",
+        DiskSelectionMode = diskSelectionMode,
+        DiskById = diskSelectionMode == "manual" ? "/dev/disk/by-id/md-uuid-TESTDISK" : null,
         Hostname = "test-host.domain.local",
         NetworkMode = networkMode,
         StaticIp = "10.0.2.15",
@@ -50,11 +51,26 @@ public class ScribanKickstartTemplateRendererTests
         => new(new FakeTemplateProvider(GetRepoTemplatesDirectory()));
 
     [Fact]
-    public void Render_SubstitutesDiskByIdInExactlyFourPlaces()
+    public void Render_SubstitutesDiskByIdInManualMode()
     {
-        var rendered = CreateRenderer().Render(RhelVersionOption.Rhel98, BuildModel("dhcp"));
+        var rendered = CreateRenderer().Render(RhelVersionOption.Rhel98, BuildModel("dhcp", "manual"));
 
-        Assert.Equal(4, CountOccurrences(rendered, "/dev/disk/by-id/md-uuid-TESTDISK"));
+        // 4 functional partitioning locations (ignoredisk + 3x part/pv) + 1 header banner mention.
+        Assert.Equal(5, CountOccurrences(rendered, "/dev/disk/by-id/md-uuid-TESTDISK"));
+        Assert.Contains("ignoredisk --only-use=/dev/disk/by-id/md-uuid-TESTDISK", rendered);
+        Assert.DoesNotContain("WYBOR DYSKU DO INSTALACJI SYSTEMU", rendered);
+    }
+
+    [Fact]
+    public void Render_EmitsInteractiveDiskSelectionScript_WhenModeIsInteractive()
+    {
+        var rendered = CreateRenderer().Render(RhelVersionOption.Rhel98, BuildModel("dhcp", "interactive"));
+
+        Assert.Contains("WYBOR DYSKU DO INSTALACJI SYSTEMU", rendered);
+        Assert.Contains("%include /tmp/part-include", rendered);
+        Assert.DoesNotContain("ignoredisk --only-use=/dev/disk/by-id/md-uuid-TESTDISK", rendered);
+        // No hardcoded disk anywhere - selection happens live via $SELECTED_DISK at install time.
+        Assert.DoesNotContain("TESTDISK", rendered);
     }
 
     [Fact]
@@ -87,10 +103,12 @@ public class ScribanKickstartTemplateRendererTests
         Assert.DoesNotContain("--bootproto=dhcp", rendered);
     }
 
-    [Fact]
-    public void Render_LeavesNoUnresolvedTemplateTokens()
+    [Theory]
+    [InlineData("manual")]
+    [InlineData("interactive")]
+    public void Render_LeavesNoUnresolvedTemplateTokens(string diskSelectionMode)
     {
-        var rendered = CreateRenderer().Render(RhelVersionOption.Rhel98, BuildModel("dhcp"));
+        var rendered = CreateRenderer().Render(RhelVersionOption.Rhel98, BuildModel("dhcp", diskSelectionMode));
 
         Assert.DoesNotContain("{{", rendered);
         Assert.DoesNotContain("}}", rendered);

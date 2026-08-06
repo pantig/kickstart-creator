@@ -17,8 +17,12 @@ public sealed class KickstartFormModel
     [Required, StringLength(253)]
     public string Hostname { get; set; } = string.Empty;
 
-    [Required, StringLength(512)]
-    public string DiskById { get; set; } = string.Empty;
+    [Required]
+    public DiskSelectionMode DiskSelectionMode { get; set; } = DiskSelectionMode.Interactive;
+
+    /// <summary>Only required/used when <see cref="DiskSelectionMode"/> is Manual.</summary>
+    [StringLength(512)]
+    public string? DiskById { get; set; }
 
     [Required]
     public NetworkMode NetworkMode { get; set; } = NetworkMode.Dhcp;

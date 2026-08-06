@@ -10,6 +10,12 @@
 # Bazowy szablon: CIS Level 2 hardened, minimal-install, headless server
 # (partycjonowanie LVM, %addon com_redhat_oscap z profilem CIS + tailoringiem,
 # firewalld z dedykowana strefa sshaccess, konto root zablokowane haslem).
+#
+# Wybor dysku: {{ disk_selection_mode }}.
+{{ if disk_selection_mode == "manual" }}# Tryb reczny - dysk podany z gory jako {{ disk_by_id }}, instalacja w pelni automatyczna.
+{{ else }}# Tryb interaktywny - %pre pokaze liste dyskow na konsoli i poczeka na wybor
+# operatora. Wymaga kogos przy konsoli w momencie instalacji.
+{{ end }}
 
 # Kickstart for HeadlessCISPodman
 # Version 9.2.1 (adapted for kickstart-creator)
@@ -20,6 +26,7 @@ eula --agreed
 # Use non-interactive install
 text --non-interactive
 
+{{ if disk_selection_mode == "manual" }}
 # Select a specific disk to use for safety
 ignoredisk --only-use={{ disk_by_id }}
 
@@ -57,6 +64,136 @@ logvol swap --fstype=swap --size=8192 --name=swap --vgname=System
 
 # Create a 10GB /home volume
 logvol /home --fstype=xfs --size=10240 --fsoptions='nodev,nosuid' --name=home --vgname=System  # RHEL8 CIS 1.1.13, CIS 1.1.14
+{{ else }}
+##################### START INTERACTIVE DISK SELECTION #####################
+# Domyslny tryb: dyski w heterogenicznym srodowisku (sda/sdb/RAID/LUN) nie
+# maja przewidywalnej kolejnosci, wiec zamiast zgadywac, %pre pokazuje
+# operatorowi liste dyskow na konsoli i czeka na wybor numeru. WYMAGA kogos
+# przy konsoli/wirtualnym KVM w momencie instalacji - NIE nadaje sie do w
+# pelni bezobslugowego PXE. Do tego przypadku wygeneruj kickstart w trybie
+# recznym (z podanym /dev/disk/by-id z gory).
+#
+# Uwaga dla konsoli szeregowej: ten skrypt zaklada /dev/tty jako aktywna
+# konsole (dziala dla fizycznej/wirtualnej konsoli KVM/BMC). Przy instalacji
+# przez konsole szeregowa (console=ttyS0) moze wymagac dostosowania do
+# wlasciwego urzadzenia tty.
+%pre --interpreter=/bin/bash --log=/tmp/disk-select-pre.log --erroronfail
+exec < /dev/tty
+exec > /dev/tty
+exec 2>&1
+
+echo ""
+echo "=================================================================="
+echo "  WYBOR DYSKU DO INSTALACJI SYSTEMU"
+echo "=================================================================="
+echo ""
+echo "UWAGA: wybrany dysk zostanie CALKOWICIE WYCZYSZCZONY (clearpart --all)."
+echo ""
+
+DISK_SOURCE_DIR=/dev/disk/by-id
+if [ ! -d "$DISK_SOURCE_DIR" ] || [ -z "$(ls -A "$DISK_SOURCE_DIR" 2>/dev/null)" ]; then
+  echo "Brak wpisow w /dev/disk/by-id - uzywam /dev/disk/by-path jako fallback."
+  DISK_SOURCE_DIR=/dev/disk/by-path
+fi
+
+declare -a DISK_LIST=()
+declare -a SEEN_TARGETS=()
+INDEX=0
+
+echo "Dostepne dyski:"
+echo ""
+
+for disk in "$DISK_SOURCE_DIR"/*; do
+  [ -e "$disk" ] || continue
+
+  # Pomijaj wpisy partycji - zarowno by-id jak i by-path oznaczaja je
+  # sufiksem "-partN".
+  case "$disk" in
+    *-part*) continue ;;
+  esac
+
+  [ -b "$disk" ] || continue
+
+  # Deduplikacja: by-id zwykle wystawia kilka aliasow (ata-..., wwn-...) dla
+  # tego samego fizycznego dysku - pokaz kazde urzadzenie docelowe tylko raz.
+  TARGET=$(readlink -f "$disk")
+  SKIP=0
+  for seen in "${SEEN_TARGETS[@]}"; do
+    if [ "$seen" = "$TARGET" ]; then
+      SKIP=1
+      break
+    fi
+  done
+  [ "$SKIP" -eq 1 ] && continue
+  SEEN_TARGETS+=("$TARGET")
+
+  INDEX=$((INDEX + 1))
+  DISK_LIST+=("$disk")
+
+  SIZE_SECTORS=$(cat "/sys/block/$(basename "$TARGET")/size" 2>/dev/null || echo 0)
+  SIZE_GB=$((SIZE_SECTORS * 512 / 1024 / 1024 / 1024))
+
+  PART_COUNT=$(lsblk -n -o NAME "$TARGET" 2>/dev/null | tail -n +2 | wc -l)
+  if [ "$PART_COUNT" -gt 0 ]; then
+    printf "  %2d) %-55s (~%4sGB)  UWAGA: %s partycji juz istnieje\n" "$INDEX" "$disk" "$SIZE_GB" "$PART_COUNT"
+  else
+    printf "  %2d) %-55s (~%4sGB)  pusty\n" "$INDEX" "$disk" "$SIZE_GB"
+  fi
+done
+
+echo ""
+
+if [ "$INDEX" -eq 0 ]; then
+  echo "BLAD: nie znaleziono zadnego dysku blokowego. Instalacja przerwana."
+  exit 1
+fi
+
+while true; do
+  read -r -p "Wpisz numer dysku do instalacji (1-$INDEX): " CHOICE
+  if [[ "$CHOICE" =~ ^[0-9]+$ ]] && [ "$CHOICE" -ge 1 ] && [ "$CHOICE" -le "$INDEX" ]; then
+    break
+  fi
+  echo "Blad: wpisz liczbe od 1 do $INDEX"
+done
+
+SELECTED_DISK="${DISK_LIST[$((CHOICE - 1))]}"
+echo "Wybrano dysk: $SELECTED_DISK ($(readlink -f "$SELECTED_DISK"))"
+echo "Wybrano dysk: $SELECTED_DISK ($(readlink -f "$SELECTED_DISK"))" >> /tmp/disk-select-pre.log
+
+# Ten sam schemat partycjonowania co w trybie recznym (CIS-owe mount options
+# zachowane), tylko z dyskiem docelowym podstawionym na podstawie wyboru
+# operatora zamiast wartosci z formularza. clearpart celuje jawnie w
+# wybrany dysk (--drives=) jako dodatkowa warstwa bezpieczenstwa ponad
+# ignoredisk.
+cat <<PART_EOF > /tmp/part-include
+ignoredisk --only-use=$SELECTED_DISK
+
+zerombr
+
+clearpart --all --initlabel --drives=$SELECTED_DISK
+
+part /boot --fstype=xfs --fsoptions='nosuid,nodev' --size=1024 --ondisk=$SELECTED_DISK
+part /boot/efi --fstype=vfat --fsoptions='defaults,umask=0027,fmask=0077,uid=0,gid=0' --size=600 --ondisk=$SELECTED_DISK
+
+part pv.01 --size 143360 --asprimary --ondisk=$SELECTED_DISK
+
+volgroup System pv.01
+
+logvol / --fstype=xfs --size=16384 --name=root --vgname=System
+logvol /var --fstype=xfs --size=20480 --fsoptions='nodev' --name=var --vgname=System
+logvol /opt --fstype=xfs --size=20480 --fsoptions='nodev' --name=opt --vgname=System
+logvol /tmp --fstype=xfs --size=4096 --fsoptions='nodev,nosuid' --name=tmp --vgname=System
+logvol /var/tmp --fstype=xfs --size=5120 --fsoptions='nodev,noexec,nosuid' --name=vartmp --vgname=System
+logvol /var/log --fstype=xfs --size=10240 --fsoptions='nodev,noexec,nosuid' --name=logs --vgname=System
+logvol /var/log/audit --fstype=xfs --size=10240 --fsoptions='nodev,noexec,nosuid' --name=auditlogs --vgname=System
+logvol swap --fstype=swap --size=8192 --name=swap --vgname=System
+logvol /home --fstype=xfs --size=10240 --fsoptions='nodev,nosuid' --name=home --vgname=System
+PART_EOF
+%end
+
+%include /tmp/part-include
+##################### END INTERACTIVE DISK SELECTION #####################
+{{ end }}
 
 # EFI GRUB with a generated password (see kickstart-creator's GRUB PBKDF2 hashing service).
 # We enable cgroups v2 here via systemd.unified_cgroup_hierarchy=1, and enable

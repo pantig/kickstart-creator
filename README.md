@@ -12,10 +12,24 @@ referencyjny - nie jest uzywany w runtime; wersja uzywana przez aplikacje to
 
 ## Co generator robi
 
-1. Formularz zbiera parametry wdrozenia: dysk (`by-id`), siec (DHCP/static),
+1. Formularz zbiera parametry wdrozenia: wybor dysku, siec (DHCP/static),
    dozwolone zrodlowe CIDR dla SSH, port SSH, dane konta administracyjnego,
    hasla (root/user/GRUB - recznie albo auto-generowane 16-znakowe), strefe
    czasowa, serwery NTP.
+
+   **Wybor dysku instalacyjnego** ma dwa tryby:
+   - **Interaktywnie podczas instalacji (domyslnie)** - w heterogenicznym
+     srodowisku kolejnosc `/dev/sda`/`/dev/sdb`/LUN-ow/RAID nie jest
+     przewidywalna, wiec zamiast zgadywac, wygenerowany kickstart pokazuje w
+     `%pre` liste dostepnych dyskow na konsoli (z ostrzezeniem przy dyskach,
+     ktore juz maja partycje) i czeka, az operator wpisze numer. Partycjonowanie
+     (ten sam schemat CIS co w trybie recznym) generuje sie dynamicznie przez
+     `%include`. **Wymaga kogos przy konsoli/wirtualnym KVM w momencie
+     instalacji - nie nadaje sie do w pelni bezobslugowego PXE.**
+   - **Podaj z gory (`by-id`)** - dysk wpisany w formularzu trafia od razu do
+     `ignoredisk`/`part`/`part pv.01` (4 miejsca, podstawiane automatycznie z
+     jednego pola). Instalacja w pelni automatyczna/bezobslugowa, ale wymaga,
+     zeby operator znal poprawny identyfikator `by-id` z gory.
 2. Hasla sa hashowane server-side: `rootpw`/`user --password` przez
    `openssl passwd -6 -stdin` (SHA-512 crypt), haslo GRUB przez natywny
    PBKDF2-HMAC-SHA512 w .NET (`Rfc2898DeriveBytes`) w formacie zgodnym z

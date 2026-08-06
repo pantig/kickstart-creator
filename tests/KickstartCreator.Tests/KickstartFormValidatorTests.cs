@@ -18,6 +18,7 @@ public class KickstartFormValidatorTests
     {
         RhelVersion = RhelVersionOption.Rhel98,
         Hostname = "ct-ma-rh9.domain.local",
+        DiskSelectionMode = DiskSelectionMode.Manual,
         DiskById = "/dev/disk/by-id/md-uuid-9f46537d:dccdf959:f48b39fa:056d38e3",
         NetworkMode = NetworkMode.Dhcp,
         SshAllowedCidrsRaw = "10.41.202.11/32\n10.41.205.11/32",
@@ -69,6 +70,30 @@ public class KickstartFormValidatorTests
         var result = CreateValidator().Validate(model);
 
         Assert.False(result.IsValid);
+    }
+
+    [Fact]
+    public void Validate_RequiresDiskByIdWhenModeIsManual()
+    {
+        var model = ValidModel();
+        model.DiskSelectionMode = DiskSelectionMode.Manual;
+        model.DiskById = null;
+
+        var result = CreateValidator().Validate(model);
+
+        Assert.False(result.IsValid);
+    }
+
+    [Fact]
+    public void Validate_AllowsMissingDiskByIdWhenModeIsInteractive()
+    {
+        var model = ValidModel();
+        model.DiskSelectionMode = DiskSelectionMode.Interactive;
+        model.DiskById = null;
+
+        var result = CreateValidator().Validate(model);
+
+        Assert.True(result.IsValid);
     }
 
     [Theory]

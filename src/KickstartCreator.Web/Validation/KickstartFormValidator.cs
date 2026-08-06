@@ -22,9 +22,10 @@ public sealed class KickstartFormValidator(ITimeZoneCatalog timeZoneCatalog)
             errors.Add("Hostname ma niepoprawny format (RFC 1123).");
         }
 
-        if (!ValidationPatterns.DiskById().IsMatch(model.DiskById))
+        if (model.DiskSelectionMode == DiskSelectionMode.Manual
+            && (string.IsNullOrWhiteSpace(model.DiskById) || !ValidationPatterns.DiskById().IsMatch(model.DiskById)))
         {
-            errors.Add("Identyfikator dysku musi mieć postać /dev/disk/by-id/... (dozwolone znaki: litery, cyfry, '_.:+-').");
+            errors.Add("Tryb ręcznego wyboru dysku wymaga poprawnego identyfikatora /dev/disk/by-id/... (dozwolone znaki: litery, cyfry, '_.:+-').");
         }
 
         if (!ValidationPatterns.LinuxAccountName().IsMatch(model.AdminUsername))

@@ -41,7 +41,8 @@ public sealed class KickstartGenerationService(
         {
             RhelVersionLabel = form.RhelVersion.GetLabel(),
             GeneratedAtUtc = DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ss"),
-            DiskById = form.DiskById,
+            DiskSelectionMode = form.DiskSelectionMode == DiskSelectionMode.Manual ? "manual" : "interactive",
+            DiskById = form.DiskSelectionMode == DiskSelectionMode.Manual ? form.DiskById : null,
             Hostname = form.Hostname,
             NetworkMode = form.NetworkMode == NetworkMode.Dhcp ? "dhcp" : "static",
             StaticIp = parsed.NormalizedStaticIp,
