@@ -673,8 +673,12 @@ chmod 0640 /etc/systemd/system.control/hostcritical.slice.d/00-MemoryLow.conf
 # See: https://www.freedesktop.org/software/systemd/man/machine-id.html
 rm -fv /etc/machine-id
 echo 'uninitialized' > /etc/machine-id
-
-# Reboot if we want to carry out post-install actions
-reboot --eject
 %end
 ##################### END POSTINSTALL SCRIPT #####################
+
+# `reboot` is a kickstart-language directive (Anaconda ejects media and
+# reboots itself after %post finishes) - it must NOT be inside %post, since
+# there it just gets shell-executed literally and no `reboot` binary actually
+# supports a "--eject" flag (this caused "reboot: unrecognized option
+# '--eject'" as a fatal kickstart error at the very end of a real install).
+reboot --eject

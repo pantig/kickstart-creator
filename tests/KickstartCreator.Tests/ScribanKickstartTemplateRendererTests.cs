@@ -138,6 +138,24 @@ public class ScribanKickstartTemplateRendererTests
     }
 
     [Fact]
+    public void Render_PlacesRebootDirectiveOutsideAnyPostSection()
+    {
+        var rendered = CreateRenderer().Render(RhelVersionOption.Rhel98, BuildModel("dhcp"));
+
+        // `reboot` is a kickstart-language directive that Anaconda interprets
+        // itself after %post finishes - inside %post it just gets executed as
+        // a literal shell command instead, and no `reboot` binary supports
+        // "--eject" (this broke a real install: "reboot: unrecognized option
+        // '--eject'" as a fatal error on the last line of %post).
+        var lastEndIndex = rendered.LastIndexOf("%end", StringComparison.Ordinal);
+        var rebootIndex = rendered.IndexOf("reboot --eject", StringComparison.Ordinal);
+
+        Assert.True(lastEndIndex >= 0, "Template should contain at least one %end.");
+        Assert.True(rebootIndex >= 0, "Template should contain the reboot --eject directive.");
+        Assert.True(rebootIndex > lastEndIndex, "reboot --eject must appear after the final %end.");
+    }
+
+    [Fact]
     public void Render_NeverEmitsPlaintextPasswords()
     {
         var rendered = CreateRenderer().Render(RhelVersionOption.Rhel98, BuildModel("dhcp"));
